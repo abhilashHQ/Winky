@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+:root {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: #ffffff;
+  background: transparent;
+}
+
 html,
 body,
 #root {
@@ -7,9 +13,231 @@ body,
   height: 100%;
   margin: 0;
   overflow: hidden;
-  background: #000;
+  background: transparent !important;
 }
 
 body {
   user-select: none;
+}
+
+.notch-stage {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: transparent;
+}
+
+.figma-notch {
+  position: relative;
+  width: 329px;
+  height: 44px;
+  overflow: visible;
+  color: #ffffff;
+}
+
+.notch-shape {
+  position: absolute;
+  inset: 0 0 auto;
+  width: 329px;
+  height: 40px;
+  display: block;
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.28));
+}
+
+.notch-shape path {
+  fill: rgba(0, 0, 0, 0.94);
+}
+
+.notch-label {
+  position: absolute;
+  left: 58px;
+  top: 6px;
+  width: 120px;
+  height: 14px;
+  margin: 0;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.96);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: label-in 160ms ease-out both;
+}
+
+.notch-visual {
+  position: absolute;
+  left: 249px;
+  top: 0;
+  width: 42px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.waveform {
+  width: 42px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.waveform span {
+  width: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  transform-origin: center;
+}
+
+.waveform-idle span {
+  height: 5px;
+  opacity: 0.42;
+}
+
+.waveform-listening span {
+  height: 10px;
+  opacity: 0.78;
+  animation: listening-wave 950ms ease-in-out infinite;
+}
+
+.waveform-speaking span {
+  height: 15px;
+  opacity: 0.95;
+  animation: speaking-wave 520ms ease-in-out infinite;
+}
+
+.waveform span:nth-child(1) {
+  animation-delay: 0ms;
+}
+
+.waveform span:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.waveform span:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+.brain-orbit {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.brain-orbit::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-top-color: rgba(255, 255, 255, 0.95);
+  border-radius: 999px;
+  animation: brain-spin 900ms linear infinite;
+}
+
+.brain-orbit::after {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  filter: blur(3px);
+  animation: brain-pulse 1100ms ease-in-out infinite;
+}
+
+.brain-orbit img {
+  position: relative;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  image-rendering: auto;
+  animation: brain-float 1100ms ease-in-out infinite;
+}
+
+.state-speaking .notch-shape path {
+  fill: rgba(0, 0, 0, 0.96);
+}
+
+.state-thinking .notch-shape path {
+  fill: rgba(0, 0, 0, 0.95);
+}
+
+@keyframes label-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes listening-wave {
+  0%, 100% {
+    transform: scaleY(0.55);
+    opacity: 0.42;
+  }
+  50% {
+    transform: scaleY(1.45);
+    opacity: 1;
+  }
+}
+
+@keyframes speaking-wave {
+  0%, 100% {
+    transform: scaleY(0.42);
+  }
+  35% {
+    transform: scaleY(1.8);
+  }
+  65% {
+    transform: scaleY(0.9);
+  }
+}
+
+@keyframes brain-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes brain-pulse {
+  0%, 100% {
+    opacity: 0.35;
+    transform: scale(0.88);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes brain-float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
 }

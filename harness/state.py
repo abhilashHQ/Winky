@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from enum import Enum
 from typing import Any
 
@@ -8,6 +9,8 @@ from websockets.exceptions import ConnectionClosed
 from websockets.legacy.server import WebSocketServerProtocol, serve
 
 logger = logging.getLogger(__name__)
+
+InputControlHandler = Callable[[bool, bool, str | None], Awaitable[None]]
 
 
 class HarnessState(str, Enum):
@@ -22,9 +25,15 @@ class StateMachine:
     def __init__(self) -> None:
         self.state = HarnessState.IDLE
         self.sub_agent_running = False
+        self.voice_input_active = False
+        self.voice_input_mode: str | None = None
         self._clients: set[WebSocketServerProtocol] = set()
         self._server: Any | None = None
         self._lock = asyncio.Lock()
+        self._input_control_handler: InputControlHandler | None = None
+
+    def set_input_control_handler(self, handler: InputControlHandler) -> None:
+        self._input_control_handler = handler
 
     async def start_ui_server(self, host: str = "127.0.0.1", port: int = 8766) -> None:
         if self._server is not None:
@@ -68,6 +77,30 @@ class StateMachine:
                 }
             )
 
+    async def set_voice_input_active(
+        self,
+        active: bool,
+        submit: bool = False,
+        mode: str | None = None,
+    ) -> None:
+        async with self._lock:
+            self.voice_input_active = active
+            self.voice_input_mode = mode if active else None
+            await self._broadcast(
+                {
+                    "type": "input_status",
+                    "active": active,
+                    "submit": submit,
+                    "mode": self.voice_input_mode,
+                }
+            )
+
+        if self._input_control_handler is not None:
+            await self._input_control_handler(active, submit, mode)
+
+    async def dismiss(self) -> None:
+        await self._broadcast({"type": "dismiss"})
+
     async def idle(self) -> None:
         await self.transition_to(HarnessState.IDLE)
 
@@ -94,9 +127,36 @@ class StateMachine:
                     }
                 )
             )
-            await websocket.wait_closed()
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "input_status",
+                        "active": self.voice_input_active,
+                        "mode": self.voice_input_mode,
+                    }
+                )
+            )
+            async for raw_message in websocket:
+                await self._handle_ui_message(raw_message)
         finally:
             self._clients.discard(websocket)
+
+    async def _handle_ui_message(self, raw_message: str | bytes) -> None:
+        try:
+            message = json.loads(raw_message)
+        except json.JSONDecodeError:
+            logger.warning("Invalid UI message: %s", raw_message)
+            return
+
+        if not isinstance(message, dict):
+            return
+
+        if message.get("type") == "input_control":
+            await self.set_voice_input_active(
+                active=bool(message.get("active")),
+                submit=bool(message.get("submit")),
+                mode=message.get("mode") if isinstance(message.get("mode"), str) else None,
+            )
 
     async def _broadcast(self, message: dict[str, Any]) -> None:
         if not self._clients:

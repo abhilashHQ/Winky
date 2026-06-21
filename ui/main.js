@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, screen } = require('electron')
+const { app, BrowserWindow, screen } = require('electron')
 const fs = require('fs')
 const path = require('path')
 const { uIOhook, UiohookKey } = require('uiohook-napi')
@@ -12,12 +12,10 @@ if (typeof app.setPath === 'function') {
 }
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
 
-const NOTCH_WIDTH = 560
-const NOTCH_HEIGHT = 36
-const WINDOWS_CORNER_CROP = 8
+const NOTCH_WIDTH = 329
+const NOTCH_HEIGHT = 44
 const HARNESS_UI_WS_URL = 'ws://127.0.0.1:8766'
 const ALT_TRIPLE_WINDOW_MS = 600
-const HOTKEY_DEBOUNCE_MS = 250
 
 let mainWindow = null
 let harnessWs = null
@@ -27,7 +25,8 @@ let currentState = 'IDLE'
 let altPressCount = 0
 let altPressTimer = null
 let altDown = false
-let lastHotkeyAt = 0
+let xDown = false
+let pushToTalkActive = false
 
 function getNotchBounds() {
   const primaryDisplay = screen.getPrimaryDisplay()
@@ -35,9 +34,9 @@ function getNotchBounds() {
 
   return {
     width: NOTCH_WIDTH,
-    height: NOTCH_HEIGHT + WINDOWS_CORNER_CROP,
+    height: NOTCH_HEIGHT,
     x: x + Math.floor((width - NOTCH_WIDTH) / 2),
-    y: -WINDOWS_CORNER_CROP,
+    y: 0,
   }
 }
 
@@ -45,10 +44,10 @@ function createNotchWindow() {
   const win = new BrowserWindow({
     ...getNotchBounds(),
     frame: false,
-    transparent: false,
-    backgroundColor: '#000000',
+    transparent: true,
+    backgroundColor: '#00000000',
     alwaysOnTop: true,
-    focusable: true,
+    focusable: false,
     skipTaskbar: true,
     resizable: false,
     movable: false,
@@ -86,20 +85,20 @@ function loadRenderer(win) {
     'data:text/html;charset=utf-8,' +
       encodeURIComponent(`<!doctype html>
 <html>
-  <body style="margin:0;overflow:hidden;background:#000">
+  <body style="margin:0;overflow:hidden;background:transparent">
     <div style="
-      width:560px;
-      height:36px;
+      width:329px;
+      height:40px;
       display:flex;
       align-items:center;
       justify-content:center;
-      color:white;
-      font:12px system-ui, sans-serif;
-      background:rgba(0,0,0,0.85);
-      border-radius:0 0 12px 12px;
+      color:#fff;
+      font:500 12px 'Segoe UI', system-ui, sans-serif;
+      background:#050505;
+      border-radius:0 0 18px 18px;
       box-sizing:border-box;
     ">
-      Winky
+      Always On
     </div>
   </body>
 </html>`)
@@ -111,12 +110,10 @@ function showNotch() {
     return
   }
 
-  const bounds = getNotchBounds()
-  mainWindow.setBounds(bounds)
+  mainWindow.setBounds(getNotchBounds())
   mainWindow.setAlwaysOnTop(true, 'screen-saver')
-  mainWindow.show()
+  mainWindow.showInactive()
   mainWindow.moveTop()
-  console.log(`Notch shown ${JSON.stringify(bounds)} visible=${mainWindow.isVisible()}`)
 }
 
 function hideNotch() {
@@ -125,43 +122,80 @@ function hideNotch() {
   }
 
   mainWindow.hide()
-  console.log(`Notch hidden visible=${mainWindow.isVisible()}`)
 }
 
-function handleHotkeyPress() {
-  if (!mainWindow) {
+function sendRendererEvent(msg) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
     return
   }
 
-  const now = Date.now()
-  if (now - lastHotkeyAt < HOTKEY_DEBOUNCE_MS) {
+  mainWindow.webContents.send('harness-event', msg)
+}
+
+function sendToHarness(msg) {
+  if (!harnessWs || harnessWs.readyState !== WebSocket.OPEN) {
     return
   }
-  lastHotkeyAt = now
 
-  console.log(`Alt+X hotkey received visible=${mainWindow.isVisible()} state=${currentState}`)
-  if (!mainWindow.isVisible()) {
+  harnessWs.send(JSON.stringify(msg))
+}
+
+function setAlwaysOnMode(enabled) {
+  alwaysOnMode = enabled
+  sendRendererEvent({ type: 'mode_change', alwaysOnMode })
+
+  if (alwaysOnMode) {
     showNotch()
+    sendToHarness({ type: 'input_control', active: true, mode: 'always_on' })
     return
   }
 
-  if (currentState === 'IDLE') {
+  sendToHarness({ type: 'input_control', active: false, submit: false })
+  if (!pushToTalkActive && currentState !== 'THINKING' && currentState !== 'SPEAKING') {
     hideNotch()
   }
 }
 
-function registerGlobalShortcuts() {
-  const registered = globalShortcut.register('Alt+X', () => {
-    handleHotkeyPress()
-  })
+function toggleAlwaysOnMode() {
+  setAlwaysOnMode(!alwaysOnMode)
+}
 
-  console.log(`Alt+X registration: ${registered ? 'ok' : 'failed'}`)
+function beginPushToTalk() {
+  if (pushToTalkActive || alwaysOnMode) {
+    return
+  }
+
+  pushToTalkActive = true
+  showNotch()
+  sendRendererEvent({ type: 'push_to_talk', active: true })
+  sendToHarness({ type: 'input_control', active: true, mode: 'push_to_talk' })
+}
+
+function endPushToTalk() {
+  if (!pushToTalkActive) {
+    return
+  }
+
+  pushToTalkActive = false
+  sendRendererEvent({ type: 'push_to_talk', active: false })
+  sendToHarness({ type: 'input_control', active: false, submit: true })
+
+  if (currentState === 'IDLE' || currentState === 'LISTENING') {
+    setTimeout(() => {
+      if (!alwaysOnMode && !pushToTalkActive && currentState !== 'THINKING' && currentState !== 'SPEAKING') {
+        hideNotch()
+      }
+    }, 120)
+  }
 }
 
 function registerUiohookHotkeys() {
   uIOhook.on('keydown', (event) => {
-    if (event.keycode === UiohookKey.X && altDown) {
-      handleHotkeyPress()
+    if (event.keycode === UiohookKey.X) {
+      xDown = true
+      if (altDown) {
+        beginPushToTalk()
+      }
       return
     }
 
@@ -169,32 +203,41 @@ function registerUiohookHotkeys() {
       return
     }
 
-    if (altDown) {
-      return
+    if (!altDown) {
+      altPressCount += 1
+      if (altPressTimer) {
+        clearTimeout(altPressTimer)
+      }
+
+      altPressTimer = setTimeout(() => {
+        altPressCount = 0
+        altPressTimer = null
+      }, ALT_TRIPLE_WINDOW_MS)
+
+      if (altPressCount >= 3) {
+        altPressCount = 0
+        clearTimeout(altPressTimer)
+        altPressTimer = null
+        toggleAlwaysOnMode()
+      }
     }
 
     altDown = true
-    altPressCount += 1
-    if (altPressTimer) {
-      clearTimeout(altPressTimer)
-    }
-
-    altPressTimer = setTimeout(() => {
-      altPressCount = 0
-      altPressTimer = null
-    }, ALT_TRIPLE_WINDOW_MS)
-
-    if (altPressCount >= 3) {
-      altPressCount = 0
-      clearTimeout(altPressTimer)
-      altPressTimer = null
-      toggleAlwaysOnMode()
+    if (xDown) {
+      beginPushToTalk()
     }
   })
 
   uIOhook.on('keyup', (event) => {
+    if (event.keycode === UiohookKey.X) {
+      xDown = false
+      endPushToTalk()
+      return
+    }
+
     if (event.keycode === UiohookKey.Alt || event.keycode === UiohookKey.AltRight) {
       altDown = false
+      endPushToTalk()
     }
   })
 
@@ -202,25 +245,17 @@ function registerUiohookHotkeys() {
   console.log('uiohook started')
 }
 
-function toggleAlwaysOnMode() {
-  alwaysOnMode = !alwaysOnMode
-  console.log(`Always-on mode: ${alwaysOnMode ? 'on' : 'off'}`)
-
-  if (alwaysOnMode) {
-    showNotch()
-    return
-  }
-
-  if (currentState === 'IDLE') {
-    hideNotch()
-  }
-}
-
 function connectHarnessWebSocket() {
   harnessWs = new WebSocket(HARNESS_UI_WS_URL)
 
   harnessWs.on('open', () => {
     console.log('Connected to harness UI WebSocket')
+    sendToHarness({
+      type: 'input_control',
+      active: alwaysOnMode || pushToTalkActive,
+      submit: false,
+      mode: alwaysOnMode ? 'always_on' : pushToTalkActive ? 'push_to_talk' : undefined,
+    })
   })
 
   harnessWs.on('message', (data) => {
@@ -236,16 +271,14 @@ function connectHarnessWebSocket() {
       currentState = msg.state
     }
 
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('harness-event', msg)
-    }
+    sendRendererEvent(msg)
 
     if (msg.type === 'dismiss') {
       setTimeout(() => {
-        if (!alwaysOnMode) {
+        if (!alwaysOnMode && !pushToTalkActive) {
           hideNotch()
         }
-      }, 800)
+      }, 180)
     }
   })
 
@@ -274,21 +307,18 @@ app.whenReady().then(() => {
 
   mainWindow.webContents.on('did-finish-load', () => {
     console.log('Renderer loaded')
-    showNotch()
+    sendRendererEvent({ type: 'mode_change', alwaysOnMode })
   })
 
   mainWindow.webContents.on('did-fail-load', (_, code, description) => {
     console.error(`Renderer failed to load: ${code} ${description}`)
   })
 
-  registerGlobalShortcuts()
   registerUiohookHotkeys()
   connectHarnessWebSocket()
 })
 
 app.on('will-quit', () => {
-  globalShortcut.unregisterAll()
-
   if (altPressTimer) {
     clearTimeout(altPressTimer)
     altPressTimer = null

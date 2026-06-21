@@ -125,6 +125,10 @@ class RT2Session:
         self._mic_queue: asyncio.Queue[bytes] | None = None
         self._input_stream: sd.RawInputStream | None = None
         self._output_stream: sd.RawOutputStream | None = None
+        self._ws: Any | None = None
+        self._sent_audio_since_activation = False
+        self._input_committed_since_activation = False
+        self.state_machine.set_input_control_handler(self._handle_input_control)
 
     def start_background(self) -> None:
         if self._task is not None and not self._task.done():
@@ -159,6 +163,9 @@ class RT2Session:
                 logger.exception("RT2 session failed")
             finally:
                 self.ready.clear()
+                self._ws = None
+                self._sent_audio_since_activation = False
+                self._input_committed_since_activation = False
                 self._close_audio_streams()
 
             if not self._stop_event.is_set():
@@ -177,6 +184,7 @@ class RT2Session:
 
         logger.info("Connecting to Azure RT2 GA endpoint")
         async with connect(rt2_ws_url, extra_headers=headers) as ws:
+            self._ws = ws
             receiver_task = asyncio.create_task(self._receive_events(ws))
             ready_task = asyncio.create_task(self.ready.wait())
             mic_task: asyncio.Task[None] | None = None
@@ -221,11 +229,14 @@ class RT2Session:
             elif event_type == "session.updated":
                 self.ready.set()
                 logger.info("RT2 session ready")
-                await self.state_machine.listening()
+                await self.state_machine.idle()
             elif event_type == "input_audio_buffer.speech_started":
                 await self.state_machine.listening()
             elif event_type == "input_audio_buffer.speech_stopped":
-                await self.state_machine.thinking()
+                if self.state_machine.voice_input_mode == "always_on":
+                    await self._submit_audio_response()
+                elif not self._input_committed_since_activation:
+                    logger.debug("RT2 detected speech stop; waiting for input release")
             elif event_type == "response.created":
                 await self.state_machine.thinking()
             elif event_type in {"response.audio.delta", "response.output_audio.delta"}:
@@ -237,8 +248,10 @@ class RT2Session:
                 if self._is_function_call_event(event):
                     await self.interceptor.handle_function_call(ws, event)
             elif event_type == "response.done":
-                await self.state_machine.listening()
-                await self.result_queue.inject_next(ws)
+                injected = await self.result_queue.inject_next(ws)
+                if not injected:
+                    await self.state_machine.idle()
+                    await self.state_machine.dismiss()
             elif event_type == "error":
                 logger.error("RT2 error: %s", event)
 
@@ -265,7 +278,7 @@ class RT2Session:
                                     "threshold": 0.5,
                                     "prefix_padding_ms": 300,
                                     "silence_duration_ms": 600,
-                                    "create_response": True,
+                                    "create_response": False,
                                     "interrupt_response": False,
                                 },
                             },
@@ -292,6 +305,8 @@ class RT2Session:
             pcm_chunk = await self._mic_queue.get()
             if self.state_machine.state == HarnessState.DICTATION:
                 continue
+            if not self.state_machine.voice_input_active:
+                continue
             await ws.send(
                 json.dumps(
                     {
@@ -300,6 +315,41 @@ class RT2Session:
                     }
                 )
             )
+            self._sent_audio_since_activation = True
+
+    async def _handle_input_control(
+        self,
+        active: bool,
+        submit: bool,
+        mode: str | None,
+    ) -> None:
+        if active:
+            self._sent_audio_since_activation = False
+            self._input_committed_since_activation = False
+            if self.state_machine.state == HarnessState.IDLE:
+                await self.state_machine.listening()
+            return
+
+        if not submit or self._ws is None or not self.ready.is_set():
+            if self.state_machine.state == HarnessState.LISTENING:
+                await self.state_machine.idle()
+            return
+
+        if not self._sent_audio_since_activation:
+            if self.state_machine.state == HarnessState.LISTENING:
+                await self.state_machine.idle()
+            return
+
+        await self._submit_audio_response()
+
+    async def _submit_audio_response(self) -> None:
+        if self._ws is None or not self.ready.is_set() or not self._sent_audio_since_activation:
+            return
+        await self._ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
+        self._input_committed_since_activation = True
+        await self._ws.send(json.dumps({"type": "response.create"}))
+        await self.state_machine.thinking()
+        self._sent_audio_since_activation = False
 
     def _start_audio_streams(self) -> None:
         loop = asyncio.get_running_loop()

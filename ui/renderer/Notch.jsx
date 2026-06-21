@@ -1,75 +1,91 @@
-const BAR_BASE = 'w-1 rounded-full bg-white/80 shadow-[0_0_12px_rgba(255,255,255,0.35)]'
+import brainIcon from './assets/brain_01.png'
 
-function ListeningVisual() {
-  return (
-    <div className="flex h-5 items-center gap-1.5" aria-label="Listening">
-      <span className={`${BAR_BASE} h-2 animate-pulse opacity-45`} />
-      <span className={`${BAR_BASE} h-3 animate-pulse opacity-55 [animation-delay:120ms]`} />
-      <span className={`${BAR_BASE} h-2 animate-pulse opacity-45 [animation-delay:240ms]`} />
-    </div>
-  )
-}
-
-function ThinkingVisual() {
-  return (
-    <div className="flex items-center justify-center" aria-label="Thinking">
-      <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-white/90 shadow-[0_0_18px_rgba(255,255,255,0.55)]" />
-    </div>
-  )
-}
-
-function SpeakingVisual() {
-  return (
-    <div className="flex h-6 items-center gap-1.5" aria-label="Speaking">
-      <span className={`${BAR_BASE} h-2 animate-bounce [animation-duration:700ms]`} />
-      <span className={`${BAR_BASE} h-5 animate-bounce [animation-delay:100ms] [animation-duration:700ms]`} />
-      <span className={`${BAR_BASE} h-3 animate-bounce [animation-delay:200ms] [animation-duration:700ms]`} />
-      <span className={`${BAR_BASE} h-6 animate-bounce [animation-delay:300ms] [animation-duration:700ms]`} />
-      <span className={`${BAR_BASE} h-2 animate-bounce [animation-delay:400ms] [animation-duration:700ms]`} />
-    </div>
-  )
-}
-
-function IdleVisual() {
-  return <div className="h-1.5 w-16 rounded-full bg-white/20" aria-label="Idle" />
-}
-
-function AgentRunningVisual() {
-  return (
-    <div className="relative flex h-8 w-8 items-center justify-center" aria-label="Agent running">
-      <div className="absolute inset-0 animate-spin rounded-full border border-white/15 border-t-white/90" />
-      <div className="flex h-5 w-5 items-center justify-center rounded-md bg-white text-[11px] font-semibold leading-none text-black shadow-[0_0_18px_rgba(255,255,255,0.35)]">
-        W
-      </div>
-    </div>
-  )
-}
-
-function StateVisual({ state }) {
-  if (state === 'LISTENING') {
-    return <ListeningVisual />
-  }
-
-  if (state === 'THINKING') {
-    return <ThinkingVisual />
-  }
-
+function getViewState(state, alwaysOnMode, pushToTalkActive, agentRunning) {
   if (state === 'SPEAKING') {
-    return <SpeakingVisual />
+    return 'speaking'
   }
 
-  return <IdleVisual />
+  if (state === 'THINKING' || agentRunning) {
+    return 'thinking'
+  }
+
+  if (pushToTalkActive || state === 'LISTENING') {
+    return 'listening'
+  }
+
+  if (alwaysOnMode) {
+    return 'always-on'
+  }
+
+  return 'listening'
 }
 
-export default function Notch({ state, agentRunning, expanded }) {
+function getLabel(viewState) {
+  if (viewState === 'always-on') {
+    return 'Always On'
+  }
+
+  if (viewState === 'thinking') {
+    return 'Thinking...'
+  }
+
+  if (viewState === 'speaking') {
+    return 'Speaking'
+  }
+
+  return 'Listening...'
+}
+
+function Waveform({ mode }) {
   return (
-    <main className="flex h-screen w-screen items-start justify-center bg-black pt-2">
-      <section
-        className={`flex w-[560px] items-center justify-center overflow-hidden rounded-b-[12px] rounded-t-none bg-[rgba(0,0,0,0.85)] text-white shadow-[0_8px_28px_rgba(0,0,0,0.28)] backdrop-blur-[20px] transition-[height] duration-250 ease-out ${
-          expanded ? 'h-[480px]' : 'h-9'
-        }`}
-      >
-        {agentRunning ? <AgentRunningVisual /> : <StateVisual state={state} />}
+    <div className={`waveform waveform-${mode}`} aria-hidden="true">
+      <span />
+      <span />
+      <span />
+    </div>
+  )
+}
+
+function Brain() {
+  return (
+    <div className="brain-orbit" aria-hidden="true">
+      <img src={brainIcon} alt="" />
+    </div>
+  )
+}
+
+function StatusVisual({ viewState }) {
+  if (viewState === 'thinking') {
+    return <Brain />
+  }
+
+  if (viewState === 'speaking') {
+    return <Waveform mode="speaking" />
+  }
+
+  if (viewState === 'listening') {
+    return <Waveform mode="listening" />
+  }
+
+  return <Waveform mode="idle" />
+}
+
+export default function Notch({ state, alwaysOnMode, pushToTalkActive, agentRunning }) {
+  const viewState = getViewState(state, alwaysOnMode, pushToTalkActive, agentRunning)
+  const label = getLabel(viewState)
+
+  return (
+    <main className="notch-stage">
+      <section className={`notch figma-notch state-${viewState}`} aria-label={`Winky status: ${label}`}>
+        <svg className="notch-shape" viewBox="0 0 329 40" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M0 0H329V22C329 31.941 320.941 40 311 40H18C8.059 40 0 31.941 0 22V0Z" />
+        </svg>
+
+        <p className="notch-label">{label}</p>
+
+        <div className="notch-visual">
+          <StatusVisual viewState={viewState} />
+        </div>
       </section>
     </main>
   )
