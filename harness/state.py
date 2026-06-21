@@ -27,6 +27,7 @@ class StateMachine:
         self.sub_agent_running = False
         self.voice_input_active = False
         self.voice_input_mode: str | None = None
+        self.speech_active = False
         self._clients: set[WebSocketServerProtocol] = set()
         self._server: Any | None = None
         self._lock = asyncio.Lock()
@@ -86,6 +87,8 @@ class StateMachine:
         async with self._lock:
             self.voice_input_active = active
             self.voice_input_mode = mode if active else None
+            if not active or mode == "always_on":
+                self.speech_active = False
             await self._broadcast(
                 {
                     "type": "input_status",
@@ -94,9 +97,26 @@ class StateMachine:
                     "mode": self.voice_input_mode,
                 }
             )
+            if not active or mode == "always_on":
+                await self._broadcast(
+                    {
+                        "type": "speech_status",
+                        "active": False,
+                    }
+                )
 
         if self._input_control_handler is not None:
             await self._input_control_handler(active, submit, mode)
+
+    async def set_speech_active(self, active: bool) -> None:
+        async with self._lock:
+            self.speech_active = active
+            await self._broadcast(
+                {
+                    "type": "speech_status",
+                    "active": active,
+                }
+            )
 
     async def dismiss(self) -> None:
         await self._broadcast({"type": "dismiss"})
@@ -133,6 +153,14 @@ class StateMachine:
                         "type": "input_status",
                         "active": self.voice_input_active,
                         "mode": self.voice_input_mode,
+                    }
+                )
+            )
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "speech_status",
+                        "active": self.speech_active,
                     }
                 )
             )

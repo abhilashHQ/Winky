@@ -231,8 +231,10 @@ class RT2Session:
                 logger.info("RT2 session ready")
                 await self.state_machine.idle()
             elif event_type == "input_audio_buffer.speech_started":
+                await self.state_machine.set_speech_active(True)
                 await self.state_machine.listening()
             elif event_type == "input_audio_buffer.speech_stopped":
+                await self.state_machine.set_speech_active(False)
                 if self.state_machine.voice_input_mode == "always_on":
                     await self._submit_audio_response()
                 elif not self._input_committed_since_activation:
@@ -326,7 +328,7 @@ class RT2Session:
         if active:
             self._sent_audio_since_activation = False
             self._input_committed_since_activation = False
-            if self.state_machine.state == HarnessState.IDLE:
+            if mode == "push_to_talk" and self.state_machine.state == HarnessState.IDLE:
                 await self.state_machine.listening()
             return
 
