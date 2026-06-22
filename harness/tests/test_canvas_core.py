@@ -1,3 +1,4 @@
+import json
 import sys
 import types
 from pathlib import Path
@@ -24,7 +25,10 @@ except ImportError:
     composio_module.Composio = object
     sys.modules["composio"] = composio_module
 
+import interceptor
 from canvas_types import normalize_canvas_step
+from interceptor import ToolInterceptor
+from result_queue import ResultQueue
 from screen_context import find_monitor_for_point
 from state import StateMachine
 
@@ -149,3 +153,103 @@ async def test_state_machine_broadcasts_canvas_event(monkeypatch):
             "step": {"annotations": [{"kind": "clear", "style": {}}]},
         }
     ]
+
+
+class FakeToolWebSocket:
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, message):
+        self.sent.append(json.loads(message))
+
+
+@pytest.mark.asyncio
+async def test_get_screen_context_returns_capture(monkeypatch):
+    monkeypatch.setattr(
+        interceptor,
+        "capture_active_monitor",
+        lambda: {
+            "status": "ok",
+            "target": "active_monitor",
+            "coordinate_space": "monitor_relative",
+            "monitor": {"x": 0, "y": 0, "width": 100, "height": 80, "scale_factor": 1.0},
+            "image": {"mime_type": "image/png", "base64": "abc"},
+        },
+    )
+    state_machine = StateMachine()
+    tool_interceptor = ToolInterceptor(ResultQueue(), state_machine)
+    ws = FakeToolWebSocket()
+
+    await tool_interceptor.handle_function_call(
+        ws,
+        {
+            "type": "response.function_call",
+            "name": "get_screen_context",
+            "call_id": "call-screen",
+            "arguments": {},
+        },
+    )
+
+    output = json.loads(ws.sent[0]["item"]["output"])
+    assert output["status"] == "ok"
+    assert output["monitor"]["width"] == 100
+
+
+@pytest.mark.asyncio
+async def test_get_screen_context_returns_error_on_capture_failure(monkeypatch):
+    def fail_capture():
+        raise RuntimeError("screen blocked")
+
+    monkeypatch.setattr(interceptor, "capture_active_monitor", fail_capture)
+    state_machine = StateMachine()
+    tool_interceptor = ToolInterceptor(ResultQueue(), state_machine)
+    ws = FakeToolWebSocket()
+
+    await tool_interceptor.handle_function_call(
+        ws,
+        {
+            "type": "response.function_call",
+            "name": "get_screen_context",
+            "call_id": "call-screen",
+            "arguments": {},
+        },
+    )
+
+    output = json.loads(ws.sent[0]["item"]["output"])
+    assert output == {"status": "error", "message": "I couldn't capture the screen."}
+
+
+@pytest.mark.asyncio
+async def test_draw_annotation_broadcasts_normalized_step(monkeypatch):
+    state_machine = StateMachine()
+    sent = []
+
+    async def fake_canvas_event(message):
+        sent.append(message)
+
+    monkeypatch.setattr(state_machine, "broadcast_canvas_event", fake_canvas_event)
+    tool_interceptor = ToolInterceptor(ResultQueue(), state_machine)
+    ws = FakeToolWebSocket()
+
+    await tool_interceptor.handle_function_call(
+        ws,
+        {
+            "type": "response.function_call",
+            "name": "draw_annotation",
+            "call_id": "call-draw",
+            "arguments": {"step": {"kind": "text", "x": 5, "y": 7, "text": "c"}},
+        },
+    )
+
+    assert sent == [
+        {
+            "type": "draw_annotation",
+            "step": {
+                "annotations": [
+                    {"kind": "text", "x": 5, "y": 7, "text": "c", "style": {}}
+                ]
+            },
+        }
+    ]
+    output = json.loads(ws.sent[0]["item"]["output"])
+    assert output == {"status": "ok", "drawn": 1}
