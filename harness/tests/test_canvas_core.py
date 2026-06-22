@@ -25,7 +25,9 @@ except ImportError:
     composio_module.Composio = object
     sys.modules["composio"] = composio_module
 
+import agents.canvas_vision_agent as canvas_vision_agent
 import interceptor
+from agent_runner import AgentRunner
 from canvas_types import normalize_canvas_step
 from interceptor import ToolInterceptor
 from result_queue import ResultQueue
@@ -253,3 +255,94 @@ async def test_draw_annotation_broadcasts_normalized_step(monkeypatch):
     ]
     output = json.loads(ws.sent[0]["item"]["output"])
     assert output == {"status": "ok", "drawn": 1}
+
+
+class FakeCanvasResponse:
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "steps": [
+                                    {
+                                        "say": "The hypotenuse is c.",
+                                        "draw": [
+                                            {"kind": "text", "x": 20, "y": 30, "text": "c"}
+                                        ],
+                                    }
+                                ]
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+
+
+class FakeAsyncClient:
+    def __init__(self, timeout):
+        self.timeout = timeout
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def post(self, url, headers, json):
+        self.url = url
+        self.headers = headers
+        self.payload = json
+        return FakeCanvasResponse()
+
+
+@pytest.mark.asyncio
+async def test_canvas_vision_agent_parses_model_steps(monkeypatch):
+    monkeypatch.setattr(canvas_vision_agent.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(
+        canvas_vision_agent,
+        "get_secret",
+        lambda key: {
+            "azure_gpt55_endpoint": "https://azure.test",
+            "azure_gpt55_key": "key",
+            "azure_gpt55_deployment": "gpt-5.5",
+        }[key],
+    )
+
+    result = await canvas_vision_agent.plan_visual_explanation("explain pythagoras", "screen context")
+
+    assert result == {
+        "success": True,
+        "steps": [
+            {
+                "say": "The hypotenuse is c.",
+                "draw": [
+                    {
+                        "kind": "text",
+                        "x": 20,
+                        "y": 30,
+                        "text": "c",
+                        "style": {},
+                    }
+                ],
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_agent_runner_routes_canvas_vision(monkeypatch):
+    async def fake_plan(task, context):
+        return {"success": True, "steps": [{"say": "One", "draw": []}]}
+
+    monkeypatch.setattr("agent_runner.plan_visual_explanation", fake_plan)
+    runner = AgentRunner(ResultQueue(), StateMachine())
+
+    result = await runner._run_canvas_vision("task", "context")
+
+    assert result == {"success": True, "steps": [{"say": "One", "draw": []}]}

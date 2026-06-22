@@ -2,6 +2,7 @@ import logging
 import re
 from typing import Any
 
+from agents.canvas_vision_agent import plan_visual_explanation
 from agents.system_agent import launch_app
 from result_queue import ResultQueue
 from state import StateMachine
@@ -35,6 +36,8 @@ class AgentRunner:
         try:
             if classification == "deterministic":
                 result = self._run_deterministic(task, context, hint)
+            elif hint == "canvas_vision":
+                result = await self._run_canvas_vision(task, context)
             else:
                 result = {
                     "success": False,
@@ -58,6 +61,9 @@ class AgentRunner:
                 "result": result,
             },
         )
+
+    async def _run_canvas_vision(self, task: str, context: str) -> dict[str, Any]:
+        return await plan_visual_explanation(task, context)
 
     def _run_deterministic(
         self,
