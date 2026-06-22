@@ -5,6 +5,7 @@ httpx
 python-dotenv
 sounddevice
 numpy
+mss
 pywin32
 comtypes
 azure-cognitiveservices-speech
