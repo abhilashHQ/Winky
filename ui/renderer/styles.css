@@ -31,46 +31,49 @@ body {
 
 .figma-notch {
   position: relative;
-  width: 329px;
-  height: 44px;
+  width: 300px;
+  height: 32px;
   overflow: visible;
   color: #ffffff;
 }
 
 .notch-shape {
   position: absolute;
-  inset: 0 0 auto;
-  width: 329px;
-  height: 40px;
+  left: 0;
+  top: 0;
+  width: 300px;
+  height: 32px;
   display: block;
+  background: rgba(0, 0, 0, 0.94);
+  border-radius: 0 0 18px 18px;
   filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.28));
+  transition: background-color 180ms ease-out, filter 180ms ease-out;
 }
 
-.notch-shape path {
-  fill: rgba(0, 0, 0, 0.94);
+.notch-label-wrap {
+  position: absolute;
+  left: 12px;
+  top: 3px;
+  width: 210px;
+  height: 24px;
+  overflow: visible;
 }
 
 .notch-label {
-  position: absolute;
-  left: 58px;
-  top: 6px;
-  width: 120px;
-  height: 14px;
   margin: 0;
-  overflow: hidden;
   color: rgba(255, 255, 255, 0.96);
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  line-height: 14px;
-  text-overflow: ellipsis;
+  font-family: "SF Pro", "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 590;
+  letter-spacing: 0;
+  line-height: 22px;
   white-space: nowrap;
-  animation: label-in 160ms ease-out both;
+  animation: label-in 180ms ease-out both;
 }
 
 .notch-visual {
   position: absolute;
-  left: 249px;
+  right: 10px;
   top: 0;
   width: 42px;
   height: 30px;
@@ -79,102 +82,103 @@ body {
   justify-content: center;
 }
 
-.waveform {
-  width: 42px;
-  height: 30px;
+.notch-visual-transition {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: visual-in 180ms ease-out both;
+}
+
+.listening-dots {
+  width: 23px;
+  height: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
 }
 
-.waveform span {
-  width: 3px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.96);
-  transform-origin: center;
-}
-
-.waveform-idle span {
+.listening-dots span {
+  width: 5px;
   height: 5px;
-  opacity: 0.42;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
 }
 
-.waveform-listening span {
-  height: 10px;
-  opacity: 0.78;
-  animation: listening-wave 950ms ease-in-out infinite;
+.state-listening .listening-dots span {
+  animation: listening-dot 1100ms ease-in-out infinite;
 }
 
-.waveform-speaking span {
-  height: 15px;
-  opacity: 0.95;
-  animation: speaking-wave 520ms ease-in-out infinite;
-}
+.state-listening .listening-dots span:nth-child(1) { animation-delay: 0ms; }
+.state-listening .listening-dots span:nth-child(2) { animation-delay: 100ms; }
+.state-listening .listening-dots span:nth-child(3) { animation-delay: 200ms; }
 
-.waveform span:nth-child(1) {
-  animation-delay: 0ms;
-}
-
-.waveform span:nth-child(2) {
-  animation-delay: 120ms;
-}
-
-.waveform span:nth-child(3) {
-  animation-delay: 240ms;
-}
-
-.brain-orbit {
-  position: relative;
+.speaking-bars {
   width: 30px;
-  height: 30px;
+  height: 17px;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 3px;
 }
 
-.brain-orbit::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-top-color: rgba(255, 255, 255, 0.95);
+.speaking-bars span {
+  width: 2px;
   border-radius: 999px;
-  animation: brain-spin 900ms linear infinite;
+  background: rgba(255, 255, 255, 0.82);
+  animation: speaking-bar 1300ms ease-in-out infinite;
+  transform-origin: center;
 }
 
-.brain-orbit::after {
-  content: "";
-  position: absolute;
-  inset: 5px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  filter: blur(3px);
-  animation: brain-pulse 1100ms ease-in-out infinite;
-}
+.speaking-bars span:nth-child(1) { height: 7px; animation-delay: 0ms; }
+.speaking-bars span:nth-child(2) { height: 11px; animation-delay: 120ms; }
+.speaking-bars span:nth-child(3) { height: 15px; animation-delay: 240ms; }
+.speaking-bars span:nth-child(4) { height: 9px; animation-delay: 360ms; }
 
-.brain-orbit img {
-  position: relative;
-  z-index: 1;
+.dotm-square-12 {
   width: 18px;
   height: 18px;
-  object-fit: contain;
-  image-rendering: auto;
-  animation: brain-float 1100ms ease-in-out infinite;
+  display: grid;
+  grid-template-columns: repeat(4, 3px);
+  grid-template-rows: repeat(3, 3px);
+  gap: 2px;
+  align-content: center;
+  justify-content: center;
 }
 
-.state-speaking .notch-shape path {
-  fill: rgba(0, 0, 0, 0.96);
+.dotm-square-12 span {
+  width: 3px;
+  height: 3px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.92);
+  animation: dotm-square 900ms ease-in-out infinite;
 }
 
-.state-thinking .notch-shape path {
-  fill: rgba(0, 0, 0, 0.95);
+.dotm-square-12 span:nth-child(1) { animation-delay: 0ms; }
+.dotm-square-12 span:nth-child(2) { animation-delay: 60ms; }
+.dotm-square-12 span:nth-child(3) { animation-delay: 120ms; }
+.dotm-square-12 span:nth-child(4) { animation-delay: 180ms; }
+.dotm-square-12 span:nth-child(5) { animation-delay: 240ms; }
+.dotm-square-12 span:nth-child(6) { animation-delay: 300ms; }
+.dotm-square-12 span:nth-child(7) { animation-delay: 360ms; }
+.dotm-square-12 span:nth-child(8) { animation-delay: 420ms; }
+.dotm-square-12 span:nth-child(9) { animation-delay: 480ms; }
+.dotm-square-12 span:nth-child(10) { animation-delay: 540ms; }
+.dotm-square-12 span:nth-child(11) { animation-delay: 600ms; }
+.dotm-square-12 span:nth-child(12) { animation-delay: 660ms; }
+
+.state-speaking .notch-shape {
+  background: rgba(0, 0, 0, 0.96);
+}
+
+.state-thinking .notch-shape {
+  background: rgba(0, 0, 0, 0.95);
 }
 
 @keyframes label-in {
   from {
     opacity: 0;
-    transform: translateY(2px);
+    transform: translateY(3px);
   }
   to {
     opacity: 1;
@@ -182,52 +186,47 @@ body {
   }
 }
 
-@keyframes listening-wave {
-  0%, 100% {
-    transform: scaleY(0.55);
-    opacity: 0.42;
+@keyframes visual-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px) scale(0.96);
   }
-  50% {
-    transform: scaleY(1.45);
-    opacity: 1;
-  }
-}
-
-@keyframes speaking-wave {
-  0%, 100% {
-    transform: scaleY(0.42);
-  }
-  35% {
-    transform: scaleY(1.8);
-  }
-  65% {
-    transform: scaleY(0.9);
-  }
-}
-
-@keyframes brain-spin {
   to {
-    transform: rotate(360deg);
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 
-@keyframes brain-pulse {
+@keyframes listening-dot {
   0%, 100% {
-    opacity: 0.35;
-    transform: scale(0.88);
+    opacity: 0.45;
+    transform: scale(0.82);
   }
   50% {
-    opacity: 0.8;
-    transform: scale(1.06);
+    opacity: 0.9;
+    transform: scale(1);
   }
 }
 
-@keyframes brain-float {
+@keyframes speaking-bar {
   0%, 100% {
-    transform: translateY(0);
+    opacity: 0.62;
+    transform: scaleY(0.86);
   }
   50% {
-    transform: translateY(-1px);
+    opacity: 0.95;
+    transform: scaleY(1.08);
+  }
+}
+
+@keyframes dotm-square {
+  0%, 100% {
+    opacity: 0.28;
+    transform: scale(0.72);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 

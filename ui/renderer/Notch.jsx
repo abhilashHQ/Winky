@@ -1,6 +1,4 @@
-import brainIcon from './assets/brain_01.png'
-
-function getViewState(state, alwaysOnMode, pushToTalkActive, agentRunning) {
+function getViewState(state, alwaysOnMode, pushToTalkActive, speechActive, agentRunning) {
   if (state === 'SPEAKING') {
     return 'speaking'
   }
@@ -9,12 +7,12 @@ function getViewState(state, alwaysOnMode, pushToTalkActive, agentRunning) {
     return 'thinking'
   }
 
-  if (pushToTalkActive || state === 'LISTENING') {
-    return 'listening'
+  if (alwaysOnMode) {
+    return speechActive ? 'listening' : 'always-on'
   }
 
-  if (alwaysOnMode) {
-    return 'always-on'
+  if (pushToTalkActive || state === 'LISTENING') {
+    return 'listening'
   }
 
   return 'listening'
@@ -36,9 +34,9 @@ function getLabel(viewState) {
   return 'Listening...'
 }
 
-function Waveform({ mode }) {
+function ListeningDots() {
   return (
-    <div className={`waveform waveform-${mode}`} aria-hidden="true">
+    <div className="listening-dots" aria-hidden="true">
       <span />
       <span />
       <span />
@@ -46,45 +44,60 @@ function Waveform({ mode }) {
   )
 }
 
-function Brain() {
+function DotmSquare12() {
   return (
-    <div className="brain-orbit" aria-hidden="true">
-      <img src={brainIcon} alt="" />
+    <div className="dotm-square-12" aria-hidden="true">
+      {Array.from({ length: 12 }, (_, index) => (
+        <span key={index} />
+      ))}
+    </div>
+  )
+}
+
+function SpeakingBars() {
+  return (
+    <div className="speaking-bars" aria-hidden="true">
+      <span />
+      <span />
+      <span />
+      <span />
     </div>
   )
 }
 
 function StatusVisual({ viewState }) {
   if (viewState === 'thinking') {
-    return <Brain />
+    return <DotmSquare12 />
   }
 
   if (viewState === 'speaking') {
-    return <Waveform mode="speaking" />
+    return <SpeakingBars />
   }
 
   if (viewState === 'listening') {
-    return <Waveform mode="listening" />
+    return <ListeningDots />
   }
 
-  return <Waveform mode="idle" />
+  return <ListeningDots />
 }
 
-export default function Notch({ state, alwaysOnMode, pushToTalkActive, agentRunning }) {
-  const viewState = getViewState(state, alwaysOnMode, pushToTalkActive, agentRunning)
+export default function Notch({ state, alwaysOnMode, pushToTalkActive, speechActive, agentRunning }) {
+  const viewState = getViewState(state, alwaysOnMode, pushToTalkActive, speechActive, agentRunning)
   const label = getLabel(viewState)
 
   return (
     <main className="notch-stage">
       <section className={`notch figma-notch state-${viewState}`} aria-label={`Winky status: ${label}`}>
-        <svg className="notch-shape" viewBox="0 0 329 40" preserveAspectRatio="none" aria-hidden="true">
-          <path d="M0 0H329V22C329 31.941 320.941 40 311 40H18C8.059 40 0 31.941 0 22V0Z" />
-        </svg>
+        <div className="notch-shape" aria-hidden="true" />
 
-        <p className="notch-label">{label}</p>
+        <div className="notch-label-wrap">
+          <p key={label} className="notch-label">{label}</p>
+        </div>
 
         <div className="notch-visual">
-          <StatusVisual viewState={viewState} />
+          <div key={viewState} className="notch-visual-transition">
+            <StatusVisual viewState={viewState} />
+          </div>
         </div>
       </section>
     </main>

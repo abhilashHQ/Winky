@@ -12,8 +12,8 @@ if (typeof app.setPath === 'function') {
 }
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
 
-const NOTCH_WIDTH = 329
-const NOTCH_HEIGHT = 44
+const NOTCH_WIDTH = 300
+const NOTCH_HEIGHT = 32
 const HARNESS_UI_WS_URL = 'ws://127.0.0.1:8766'
 const ALT_TRIPLE_WINDOW_MS = 600
 
@@ -87,8 +87,8 @@ function loadRenderer(win) {
 <html>
   <body style="margin:0;overflow:hidden;background:transparent">
     <div style="
-      width:329px;
-      height:40px;
+      width:300px;
+      height:32px;
       display:flex;
       align-items:center;
       justify-content:center;

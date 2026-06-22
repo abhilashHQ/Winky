@@ -5,6 +5,7 @@ export default function App() {
   const [state, setState] = useState('IDLE')
   const [alwaysOnMode, setAlwaysOnMode] = useState(false)
   const [pushToTalkActive, setPushToTalkActive] = useState(false)
+  const [speechActive, setSpeechActive] = useState(false)
   const [agentRunning, setAgentRunning] = useState(false)
 
   useEffect(() => {
@@ -19,6 +20,10 @@ export default function App() {
 
       if (msg.type === 'mode_change') {
         setAlwaysOnMode(Boolean(msg.alwaysOnMode))
+        setSpeechActive(false)
+        if (msg.alwaysOnMode) {
+          setPushToTalkActive(false)
+        }
       }
 
       if (msg.type === 'push_to_talk') {
@@ -26,7 +31,15 @@ export default function App() {
       }
 
       if (msg.type === 'input_status') {
+        setAlwaysOnMode(msg.mode === 'always_on' && Boolean(msg.active))
         setPushToTalkActive(msg.mode === 'push_to_talk' && Boolean(msg.active))
+        if (!msg.active) {
+          setSpeechActive(false)
+        }
+      }
+
+      if (msg.type === 'speech_status') {
+        setSpeechActive(Boolean(msg.active))
       }
 
       if (msg.type === 'agent_status') {
@@ -48,6 +61,7 @@ export default function App() {
       state={state}
       alwaysOnMode={alwaysOnMode}
       pushToTalkActive={pushToTalkActive}
+      speechActive={speechActive}
       agentRunning={agentRunning}
     />
   )
