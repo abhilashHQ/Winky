@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen } = require('electron')
+const { app, BrowserWindow, ipcMain, screen } = require('electron')
 const fs = require('fs')
 const path = require('path')
 const { uIOhook, UiohookKey } = require('uiohook-napi')
@@ -14,10 +14,13 @@ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
 
 const NOTCH_WIDTH = 300
 const NOTCH_HEIGHT = 32
+const CANVAS_CLEAR_HIDE_DELAY_MS = 260
 const HARNESS_UI_WS_URL = 'ws://127.0.0.1:8766'
 const ALT_TRIPLE_WINDOW_MS = 600
 
 let mainWindow = null
+let canvasWindow = null
+let canvasHideTimer = null
 let harnessWs = null
 let harnessReconnectTimer = null
 let alwaysOnMode = false
@@ -38,6 +41,20 @@ function getNotchBounds() {
     x: x + Math.floor((width - NOTCH_WIDTH) / 2),
     y: 0,
   }
+}
+
+function getCanvasBounds(monitor) {
+  if (monitor && Number.isFinite(monitor.x) && Number.isFinite(monitor.y) && Number.isFinite(monitor.width) && Number.isFinite(monitor.height)) {
+    return {
+      x: Math.round(monitor.x),
+      y: Math.round(monitor.y),
+      width: Math.round(monitor.width),
+      height: Math.round(monitor.height),
+    }
+  }
+
+  const primaryDisplay = screen.getPrimaryDisplay()
+  return primaryDisplay.bounds
 }
 
 function createNotchWindow() {
@@ -66,6 +83,35 @@ function createNotchWindow() {
   win.setAlwaysOnTop(true, 'screen-saver')
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   win.setIgnoreMouseEvents(false)
+  return win
+}
+
+function createCanvasWindow() {
+  const win = new BrowserWindow({
+    ...screen.getPrimaryDisplay().bounds,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    alwaysOnTop: true,
+    focusable: false,
+    skipTaskbar: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    hasShadow: false,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+
+  win.setAlwaysOnTop(true, 'screen-saver')
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  win.setIgnoreMouseEvents(true, { forward: true })
   return win
 }
 
@@ -105,6 +151,27 @@ function loadRenderer(win) {
   )
 }
 
+function loadCanvasRenderer(win) {
+  if (process.env.VITE_DEV_SERVER_URL) {
+    win.loadURL(`${process.env.VITE_DEV_SERVER_URL}/canvas.html`)
+    return
+  }
+
+  const rendererPath = path.join(__dirname, 'dist', 'renderer', 'canvas.html')
+  if (fs.existsSync(rendererPath)) {
+    win.loadFile(rendererPath)
+    return
+  }
+
+  win.loadURL(
+    'data:text/html;charset=utf-8,' +
+      encodeURIComponent(`<!doctype html>
+<html>
+  <body style="margin:0;overflow:hidden;background:transparent"></body>
+</html>`)
+  )
+}
+
 function showNotch() {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return
@@ -130,6 +197,46 @@ function sendRendererEvent(msg) {
   }
 
   mainWindow.webContents.send('harness-event', msg)
+}
+
+function sendCanvasEvent(msg) {
+  if (!canvasWindow || canvasWindow.isDestroyed()) {
+    return false
+  }
+
+  canvasWindow.webContents.send('canvas-event', msg)
+  return true
+}
+
+function showCanvasOverlay(monitor) {
+  if (!canvasWindow || canvasWindow.isDestroyed()) {
+    return false
+  }
+
+  if (canvasHideTimer) {
+    clearTimeout(canvasHideTimer)
+    canvasHideTimer = null
+  }
+
+  canvasWindow.setBounds(getCanvasBounds(monitor))
+  canvasWindow.setAlwaysOnTop(true, 'screen-saver')
+  canvasWindow.setIgnoreMouseEvents(true, { forward: true })
+  canvasWindow.showInactive()
+  canvasWindow.moveTop()
+  return true
+}
+
+function hideCanvasOverlaySoon() {
+  if (canvasHideTimer) {
+    clearTimeout(canvasHideTimer)
+  }
+
+  canvasHideTimer = setTimeout(() => {
+    canvasHideTimer = null
+    if (canvasWindow && !canvasWindow.isDestroyed()) {
+      canvasWindow.hide()
+    }
+  }, CANVAS_CLEAR_HIDE_DELAY_MS)
 }
 
 function sendToHarness(msg) {
@@ -271,6 +378,13 @@ function connectHarnessWebSocket() {
       currentState = msg.state
     }
 
+    if (msg.type === 'draw_annotation') {
+      const monitor = msg.monitor || msg.step?.monitor
+      showCanvasOverlay(monitor)
+      sendCanvasEvent(msg)
+      return
+    }
+
     sendRendererEvent(msg)
 
     if (msg.type === 'dismiss') {
@@ -300,10 +414,17 @@ function scheduleHarnessReconnect() {
   }, 1000)
 }
 
+ipcMain.handle('canvas-cleared', () => {
+  hideCanvasOverlaySoon()
+  return true
+})
+
 app.whenReady().then(() => {
   console.log('Electron ready')
   mainWindow = createNotchWindow()
   loadRenderer(mainWindow)
+  canvasWindow = createCanvasWindow()
+  loadCanvasRenderer(canvasWindow)
 
   mainWindow.webContents.on('did-finish-load', () => {
     console.log('Renderer loaded')
@@ -327,6 +448,16 @@ app.on('will-quit', () => {
   if (harnessReconnectTimer) {
     clearTimeout(harnessReconnectTimer)
     harnessReconnectTimer = null
+  }
+
+  if (canvasHideTimer) {
+    clearTimeout(canvasHideTimer)
+    canvasHideTimer = null
+  }
+
+  if (canvasWindow && !canvasWindow.isDestroyed()) {
+    canvasWindow.close()
+    canvasWindow = null
   }
 
   if (harnessWs) {
