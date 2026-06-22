@@ -62,13 +62,13 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "draw_annotation",
-        "description": "Draw one annotation step on the canvas overlay.",
+        "description": "Draw one monitor-relative annotation step on the transparent canvas overlay. The step may contain one annotation or an annotations array.",
         "parameters": {
             "type": "object",
             "properties": {
                 "step": {
                     "type": "object",
-                    "description": "Shape type, position, dimensions, label text",
+                    "description": "One annotation object or {annotations:[...]}. Supported kinds: line, arrow, rect, circle, text, formula, triangle, clear.",
                 }
             },
             "required": ["step"],
