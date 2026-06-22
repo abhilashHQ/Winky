@@ -2,6 +2,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 HARNESS_DIR = Path(__file__).resolve().parents[1]
 if str(HARNESS_DIR) not in sys.path:
     sys.path.insert(0, str(HARNESS_DIR))
@@ -24,6 +26,7 @@ except ImportError:
 
 from canvas_types import normalize_canvas_step
 from screen_context import find_monitor_for_point
+from state import StateMachine
 
 
 def test_find_monitor_for_point_uses_monitor_containing_cursor():
@@ -119,5 +122,30 @@ def test_normalize_canvas_step_keeps_triangle_points():
                 {"x": 90, "y": 10},
             ],
             "style": {},
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_state_machine_broadcasts_canvas_event(monkeypatch):
+    state_machine = StateMachine()
+    sent = []
+
+    async def fake_broadcast(message):
+        sent.append(message)
+
+    monkeypatch.setattr(state_machine, "_broadcast", fake_broadcast)
+
+    await state_machine.broadcast_canvas_event(
+        {
+            "type": "draw_annotation",
+            "step": {"annotations": [{"kind": "clear", "style": {}}]},
+        }
+    )
+
+    assert sent == [
+        {
+            "type": "draw_annotation",
+            "step": {"annotations": [{"kind": "clear", "style": {}}]},
         }
     ]

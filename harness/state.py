@@ -121,6 +121,9 @@ class StateMachine:
     async def dismiss(self) -> None:
         await self._broadcast({"type": "dismiss"})
 
+    async def broadcast_canvas_event(self, message: dict[str, Any]) -> None:
+        await self._broadcast(message)
+
     async def idle(self) -> None:
         await self.transition_to(HarnessState.IDLE)
 
