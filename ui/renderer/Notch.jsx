@@ -1,4 +1,10 @@
+import ApprovalGate from './ApprovalGate.jsx'
+
 function getViewState(state, alwaysOnMode, pushToTalkActive, speechActive, agentRunning) {
+  if (state === 'WAITING_APPROVAL') {
+    return 'waiting-approval'
+  }
+
   if (state === 'SPEAKING') {
     return 'speaking'
   }
@@ -19,6 +25,10 @@ function getViewState(state, alwaysOnMode, pushToTalkActive, speechActive, agent
 }
 
 function getLabel(viewState) {
+  if (viewState === 'waiting-approval') {
+    return 'Waiting'
+  }
+
   if (viewState === 'always-on') {
     return 'Always On'
   }
@@ -81,13 +91,23 @@ function StatusVisual({ viewState }) {
   return <ListeningDots />
 }
 
-export default function Notch({ state, alwaysOnMode, pushToTalkActive, speechActive, agentRunning }) {
+export default function Notch({
+  state,
+  alwaysOnMode,
+  pushToTalkActive,
+  speechActive,
+  agentRunning,
+  approvalRequest,
+  onApprovalConfirm,
+  onApprovalCancel,
+}) {
   const viewState = getViewState(state, alwaysOnMode, pushToTalkActive, speechActive, agentRunning)
   const label = getLabel(viewState)
+  const expanded = Boolean(approvalRequest)
 
   return (
     <main className="notch-stage">
-      <section className={`notch figma-notch state-${viewState}`} aria-label={`Winky status: ${label}`}>
+      <section className={`notch figma-notch state-${viewState}${expanded ? ' expanded' : ''}`} aria-label={`Winky status: ${label}`}>
         <div className="notch-shape" aria-hidden="true" />
 
         <div className="notch-label-wrap">
@@ -99,6 +119,17 @@ export default function Notch({ state, alwaysOnMode, pushToTalkActive, speechAct
             <StatusVisual viewState={viewState} />
           </div>
         </div>
+
+        {approvalRequest && (
+          <div className="approval-gate-wrap">
+            <ApprovalGate
+              preview={approvalRequest.preview}
+              actionType={approvalRequest.actionType}
+              onConfirm={onApprovalConfirm}
+              onCancel={onApprovalCancel}
+            />
+          </div>
+        )}
       </section>
     </main>
   )

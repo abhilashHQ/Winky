@@ -12,5 +12,7 @@ contextBridge.exposeInMainWorld('winky', {
     return () => {
       ipcRenderer.removeListener('harness-event', listener)
     }
-  }
+  },
+  sendToHarness: (msg) => ipcRenderer.invoke('send-to-harness', msg),
+  resizeApproval: (height) => ipcRenderer.invoke('resize-approval', height)
 })

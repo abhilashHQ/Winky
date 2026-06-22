@@ -17,6 +17,7 @@ class ToolInterceptor:
         self.result_queue = result_queue
         self.state_machine = state_machine
         self.agent_runner = AgentRunner(result_queue, state_machine)
+        self._approval_lock = asyncio.Lock()
 
     async def handle_function_call(self, ws: Any, event: dict[str, Any]) -> None:
         name = self._get_tool_name(event)
@@ -60,17 +61,7 @@ class ToolInterceptor:
                 },
             )
         elif name == "approval_gate":
-            await self._send_tool_result(
-                ws,
-                call_id,
-                {
-                    "status": "mock",
-                    "approved": True,
-                    "message": "Approval gate is stubbed for Phase 0.",
-                    "action_type": args.get("action_type"),
-                    "preview": args.get("preview"),
-                },
-            )
+            await self._handle_approval_gate(ws, call_id, args)
         else:
             await self._send_tool_result(
                 ws,
@@ -112,6 +103,41 @@ class ToolInterceptor:
             logger.warning("spawn_agent ACK took %.2fms", elapsed_ms)
         else:
             logger.debug("spawn_agent ACK took %.2fms", elapsed_ms)
+
+    async def _handle_approval_gate(
+        self,
+        ws: Any,
+        call_id: str,
+        args: dict[str, Any],
+    ) -> None:
+        preview = str(args.get("preview", ""))
+        action_type = str(args.get("action_type", ""))
+        async with self._approval_lock:
+            response = await self.state_machine.request_approval(
+                call_id=call_id,
+                preview=preview,
+                action_type=action_type,
+                timeout=60.0,
+            )
+
+        if response is None:
+            await self._send_tool_result(
+                ws,
+                call_id,
+                {
+                    "approved": False,
+                    "reason": "timeout",
+                },
+            )
+            return
+
+        await self._send_tool_result(
+            ws,
+            call_id,
+            {
+                "approved": bool(response["approved"]),
+            },
+        )
 
     async def _send_tool_result(
         self,

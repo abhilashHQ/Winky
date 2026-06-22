@@ -4,6 +4,7 @@ Voice in, action out. GPT-Realtime-2 is the brain. The harness manages sub-agent
 
 @docs/ARCHITECTURE.md
 @docs/PHASE0.md
+@docs/PHASE1.md
 
 ## Tech Stack
 
@@ -23,14 +24,21 @@ winky/
 ├── harness/
 │   ├── main.py            # FastAPI entry + WebSocket bridge to UI
 │   ├── session.py         # RT2 WebSocket session manager
-│   ├── state.py           # Harness state machine (IDLE/LISTENING/THINKING/SPEAKING)
+│   ├── state.py           # Harness state machine
 │   ├── interceptor.py     # RT2 tool call interceptor
-│   ├── agent_runner.py    # Sub-agent lifecycle (spawn, async run, queue result)
+│   ├── agent_runner.py    # Sub-agent lifecycle
 │   ├── result_queue.py    # FIFO queue, injects on response.done
 │   ├── dictation.py       # Azure STT streaming session
 │   ├── canvas.py          # Canvas step dispatcher
+│   ├── secrets.py         # Cloudflare Worker secrets fetch (Phase 1)
+│   ├── mcp_manager.py     # On-demand MCP process lifecycle (Phase 1)
+│   ├── urgency.py         # Hybrid urgency classifier (Phase 1)
 │   └── agents/
-│       └── system_agent.py  # Win32 system agent (Phase 0 — app launch)
+│       ├── system_agent.py   # Win32 app launcher (Phase 0)
+│       ├── email_agent.py    # Gmail operations (Phase 1)
+│       ├── slack_agent.py    # Slack operations (Phase 1)
+│       ├── calendar_agent.py # Google Calendar (Phase 1)
+│       └── brief_agent.py    # Pre-meeting brief compound (Phase 1)
 ├── ui/
 │   ├── main.js            # Electron main process, global hotkeys, window manager
 │   ├── preload.js         # Context bridge (ipcRenderer exposed to renderer)
@@ -67,21 +75,12 @@ npm run start   # concurrently runs harness + electron
 
 ## Environment Variables
 
-All in `harness/.env` — gitignored, never committed.
-
+`harness/.env` — only two values after Phase 1:
 ```
-AZURE_RT2_ENDPOINT=
-AZURE_RT2_API_KEY=
-AZURE_RT2_DEPLOYMENT=gpt-4o-realtime-preview
-AZURE_GPT55_ENDPOINT=
-AZURE_GPT55_API_KEY=
-AZURE_GPT55_DEPLOYMENT=
-AZURE_MINI_ENDPOINT=
-AZURE_MINI_API_KEY=
-AZURE_MINI_DEPLOYMENT=
-AZURE_STT_KEY=
-AZURE_STT_REGION=
+WORKER_URL=https://your-worker.your-subdomain.workers.dev
+WORKER_API_KEY=
 ```
+All other app secrets (Azure endpoints and Composio API key) live in the Cloudflare Worker. App OAuth for Gmail, Slack, Calendar, and other cloud services is handled by Composio connected accounts, not Winky. Harness fetches startup secrets via `secrets.py`. See `.claude/rules/cloudflare-worker.md`.
 
 ## Hard Invariants — Never Violate
 

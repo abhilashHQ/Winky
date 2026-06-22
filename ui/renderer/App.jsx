@@ -7,6 +7,7 @@ export default function App() {
   const [pushToTalkActive, setPushToTalkActive] = useState(false)
   const [speechActive, setSpeechActive] = useState(false)
   const [agentRunning, setAgentRunning] = useState(false)
+  const [approvalRequest, setApprovalRequest] = useState(null)
 
   useEffect(() => {
     if (!window.winky?.onHarnessEvent) {
@@ -53,8 +54,33 @@ export default function App() {
       if (msg.type === 'agent_done') {
         setAgentRunning(false)
       }
+
+      if (msg.type === 'approval_request') {
+        setApprovalRequest({
+          callId: msg.call_id,
+          preview: msg.preview,
+          actionType: msg.action_type,
+        })
+      }
+
+      if (msg.type === 'dismiss') {
+        setApprovalRequest(null)
+      }
     })
   }, [])
+
+  function respondToApproval(approved) {
+    if (!approvalRequest) {
+      return
+    }
+
+    window.winky?.sendToHarness?.({
+      type: 'approval_response',
+      call_id: approvalRequest.callId,
+      approved,
+    })
+    setApprovalRequest(null)
+  }
 
   return (
     <Notch
@@ -63,6 +89,9 @@ export default function App() {
       pushToTalkActive={pushToTalkActive}
       speechActive={speechActive}
       agentRunning={agentRunning}
+      approvalRequest={approvalRequest}
+      onApprovalConfirm={() => respondToApproval(true)}
+      onApprovalCancel={() => respondToApproval(false)}
     />
   )
 }

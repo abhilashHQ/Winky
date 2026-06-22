@@ -2,13 +2,12 @@ import asyncio
 import base64
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
 import sounddevice as sd
-from dotenv import load_dotenv
 from interceptor import ToolInterceptor
+from secrets import get as get_secret
 from result_queue import ResultQueue
 from state import HarnessState, StateMachine
 from websockets.legacy.client import connect
@@ -127,7 +126,10 @@ class RT2Session:
         self._output_stream: sd.RawOutputStream | None = None
         self._ws: Any | None = None
         self._sent_audio_since_activation = False
+        self._commit_in_progress = False
         self._input_committed_since_activation = False
+        self._server_vad_response_pending = False
+        self._response_active = False
         self.state_machine.set_input_control_handler(self._handle_input_control)
 
     def start_background(self) -> None:
@@ -150,7 +152,6 @@ class RT2Session:
             self._task = None
 
     async def run(self) -> None:
-        load_dotenv(self.harness_dir / ".env")
         while not self._stop_event.is_set():
             self.running = True
             self.ready.clear()
@@ -164,8 +165,7 @@ class RT2Session:
             finally:
                 self.ready.clear()
                 self._ws = None
-                self._sent_audio_since_activation = False
-                self._input_committed_since_activation = False
+                self._reset_turn_submission_flags()
                 self._close_audio_streams()
 
             if not self._stop_event.is_set():
@@ -175,9 +175,9 @@ class RT2Session:
         self.running = False
 
     async def _connect_once(self) -> None:
-        endpoint = self._required_env("AZURE_RT2_ENDPOINT").rstrip("/")
-        api_key = self._required_env("AZURE_RT2_API_KEY")
-        deployment = self._required_env("AZURE_RT2_DEPLOYMENT")
+        endpoint = get_secret("azure_rt2_endpoint").rstrip("/")
+        api_key = get_secret("azure_rt2_key")
+        deployment = get_secret("azure_rt2_deployment")
         ws_endpoint = self._websocket_endpoint(endpoint)
         rt2_ws_url = f"{ws_endpoint}/openai/v1/realtime?model={deployment}"
         headers = {"api-key": api_key}
@@ -235,11 +235,20 @@ class RT2Session:
                 await self.state_machine.listening()
             elif event_type == "input_audio_buffer.speech_stopped":
                 await self.state_machine.set_speech_active(False)
-                if self.state_machine.voice_input_mode == "always_on":
-                    await self._submit_audio_response()
+                if self.state_machine.voice_input_mode == "always_on" and not self._input_committed_since_activation:
+                    logger.info("RT2 detected speech stop in always-on mode; waiting for server VAD commit")
+                    self._server_vad_response_pending = self._sent_audio_since_activation
+                    if not self._server_vad_response_pending and self.state_machine.state == HarnessState.LISTENING:
+                        await self.state_machine.idle()
+                elif self.state_machine.voice_input_mode == "always_on":
+                    logger.info("RT2 detected speech stop in always-on mode after this turn was already submitted")
                 elif not self._input_committed_since_activation:
                     logger.debug("RT2 detected speech stop; waiting for input release")
+            elif event_type in {"input_audio_buffer.committed", "conversation.item.created"}:
+                if self._server_vad_response_pending:
+                    await self._create_audio_response()
             elif event_type == "response.created":
+                self._response_active = True
                 await self.state_machine.thinking()
             elif event_type in {"response.audio.delta", "response.output_audio.delta"}:
                 self._play_audio_delta(event)
@@ -250,11 +259,14 @@ class RT2Session:
                 if self._is_function_call_event(event):
                     await self.interceptor.handle_function_call(ws, event)
             elif event_type == "response.done":
+                self._response_active = False
+                self._reset_turn_submission_flags()
                 injected = await self.result_queue.inject_next(ws)
                 if not injected:
                     await self.state_machine.idle()
                     await self.state_machine.dismiss()
             elif event_type == "error":
+                self._reset_turn_submission_flags()
                 logger.error("RT2 error: %s", event)
 
     async def _send_session_update(self, ws: Any) -> None:
@@ -327,17 +339,26 @@ class RT2Session:
     ) -> None:
         if active:
             self._sent_audio_since_activation = False
+            self._commit_in_progress = False
             self._input_committed_since_activation = False
+            self._server_vad_response_pending = False
             if mode == "push_to_talk" and self.state_machine.state == HarnessState.IDLE:
                 await self.state_machine.listening()
             return
 
         if not submit or self._ws is None or not self.ready.is_set():
+            logger.info(
+                "Input release skipped: submit=%s ws_ready=%s session_ready=%s",
+                submit,
+                self._ws is not None,
+                self.ready.is_set(),
+            )
             if self.state_machine.state == HarnessState.LISTENING:
                 await self.state_machine.idle()
             return
 
         if not self._sent_audio_since_activation:
+            logger.info("Input release skipped: no audio was sent for this activation")
             if self.state_machine.state == HarnessState.LISTENING:
                 await self.state_machine.idle()
             return
@@ -345,13 +366,47 @@ class RT2Session:
         await self._submit_audio_response()
 
     async def _submit_audio_response(self) -> None:
-        if self._ws is None or not self.ready.is_set() or not self._sent_audio_since_activation:
+        if self._ws is None or not self.ready.is_set() or self._commit_in_progress:
+            logger.info(
+                "Audio submit skipped: ws_ready=%s session_ready=%s commit_in_progress=%s",
+                self._ws is not None,
+                self.ready.is_set(),
+                self._commit_in_progress,
+            )
             return
+        if not self._sent_audio_since_activation:
+            logger.info("Audio submit skipped: no audio buffered for this turn")
+            if self.state_machine.state == HarnessState.LISTENING:
+                await self.state_machine.idle()
+            return
+        self._commit_in_progress = True
         await self._ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
+        await self._create_audio_response()
+        logger.info("Submitted audio buffer to RT2")
+        self._sent_audio_since_activation = False
+
+    async def _create_audio_response(self) -> None:
+        if self._ws is None or not self.ready.is_set() or self._input_committed_since_activation or self._response_active:
+            logger.info(
+                "Response create skipped: ws_ready=%s session_ready=%s input_committed=%s response_active=%s",
+                self._ws is not None,
+                self.ready.is_set(),
+                self._input_committed_since_activation,
+                self._response_active,
+            )
+            return
         self._input_committed_since_activation = True
+        self._server_vad_response_pending = False
         await self._ws.send(json.dumps({"type": "response.create"}))
+        logger.info("Requested RT2 response for server VAD turn")
         await self.state_machine.thinking()
         self._sent_audio_since_activation = False
+
+    def _reset_turn_submission_flags(self) -> None:
+        self._sent_audio_since_activation = False
+        self._commit_in_progress = False
+        self._input_committed_since_activation = False
+        self._server_vad_response_pending = False
 
     def _start_audio_streams(self) -> None:
         loop = asyncio.get_running_loop()
@@ -423,10 +478,3 @@ class RT2Session:
         if endpoint.startswith("http://"):
             return f"ws://{endpoint.removeprefix('http://')}"
         return endpoint
-
-    @staticmethod
-    def _required_env(name: str) -> str:
-        value = os.getenv(name)
-        if not value:
-            raise RuntimeError(f"Missing required environment variable: {name}")
-        return value

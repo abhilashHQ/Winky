@@ -19,6 +19,7 @@ class HarnessState(str, Enum):
     THINKING = "THINKING"
     SPEAKING = "SPEAKING"
     DICTATION = "DICTATION"
+    WAITING_APPROVAL = "WAITING_APPROVAL"
 
 
 class StateMachine:
@@ -32,6 +33,7 @@ class StateMachine:
         self._server: Any | None = None
         self._lock = asyncio.Lock()
         self._input_control_handler: InputControlHandler | None = None
+        self._approval_waiters: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 
     def set_input_control_handler(self, handler: InputControlHandler) -> None:
         self._input_control_handler = handler
@@ -121,6 +123,34 @@ class StateMachine:
     async def dismiss(self) -> None:
         await self._broadcast({"type": "dismiss"})
 
+    async def request_approval(
+        self,
+        call_id: str,
+        preview: str,
+        action_type: str,
+        timeout: float = 60.0,
+    ) -> dict[str, Any] | None:
+        response_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1)
+        self._approval_waiters[call_id] = response_queue
+        previous_state = self.state
+        try:
+            await self.transition_to(HarnessState.WAITING_APPROVAL)
+            await self._broadcast(
+                {
+                    "type": "approval_request",
+                    "call_id": call_id,
+                    "preview": preview,
+                    "action_type": action_type,
+                }
+            )
+            return await asyncio.wait_for(response_queue.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            self._approval_waiters.pop(call_id, None)
+            if self.state == HarnessState.WAITING_APPROVAL:
+                await self.transition_to(previous_state)
+
     async def idle(self) -> None:
         await self.transition_to(HarnessState.IDLE)
 
@@ -184,6 +214,21 @@ class StateMachine:
                 active=bool(message.get("active")),
                 submit=bool(message.get("submit")),
                 mode=message.get("mode") if isinstance(message.get("mode"), str) else None,
+            )
+            return
+
+        if message.get("type") == "approval_response":
+            call_id = message.get("call_id")
+            if not isinstance(call_id, str):
+                return
+            waiter = self._approval_waiters.get(call_id)
+            if waiter is None:
+                return
+            await waiter.put(
+                {
+                    "call_id": call_id,
+                    "approved": bool(message.get("approved")),
+                }
             )
 
     async def _broadcast(self, message: dict[str, Any]) -> None:

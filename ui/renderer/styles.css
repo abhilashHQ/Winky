@@ -33,8 +33,13 @@ body {
   position: relative;
   width: 300px;
   height: 32px;
-  overflow: visible;
+  overflow: hidden;
   color: #ffffff;
+  transition: height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.figma-notch.expanded {
+  height: auto;
 }
 
 .notch-shape {
@@ -44,10 +49,14 @@ body {
   width: 300px;
   height: 32px;
   display: block;
-  background: rgba(0, 0, 0, 0.94);
+  background: #111111;
   border-radius: 0 0 18px 18px;
   filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.28));
-  transition: background-color 180ms ease-out, filter 180ms ease-out;
+  transition: height 0.25s cubic-bezier(0.4, 0, 0.2, 1), background-color 180ms ease-out, filter 180ms ease-out;
+}
+
+.figma-notch.expanded .notch-shape {
+  height: 100%;
 }
 
 .notch-label-wrap {
@@ -87,6 +96,95 @@ body {
   align-items: center;
   justify-content: center;
   animation: visual-in 180ms ease-out both;
+}
+
+.approval-gate-wrap {
+  position: relative;
+  z-index: 1;
+  margin-top: 32px;
+}
+
+.approval-card {
+  width: 100%;
+  padding: 10px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  background: #111111;
+}
+
+.approval-state-pill {
+  width: fit-content;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 11px;
+  font-weight: 590;
+  line-height: 14px;
+}
+
+.approval-state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #f5c451;
+  box-shadow: 0 0 12px rgba(245, 196, 81, 0.65);
+  animation: approval-pulse 1100ms ease-in-out infinite;
+}
+
+.approval-preview {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.94);
+  font-family: "SF Pro", "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.approval-actions {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  padding-top: 2px;
+}
+
+.approval-button {
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  background: #050505;
+  transition: transform 120ms ease-out, background-color 120ms ease-out, border-color 120ms ease-out;
+}
+
+.approval-button:hover {
+  transform: translateY(-1px);
+  background: #181818;
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.approval-confirm:hover {
+  color: #bdf7cf;
+}
+
+.approval-cancel:hover {
+  color: #ffb8b8;
+}
+
+.approval-icon {
+  width: 18px;
+  height: 18px;
 }
 
 .listening-dots {
@@ -223,6 +321,17 @@ body {
   0%, 100% {
     opacity: 0.28;
     transform: scale(0.72);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes approval-pulse {
+  0%, 100% {
+    opacity: 0.45;
+    transform: scale(0.86);
   }
   50% {
     opacity: 1;

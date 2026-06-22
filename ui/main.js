@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen } = require('electron')
+const { app, BrowserWindow, ipcMain, screen } = require('electron')
 const fs = require('fs')
 const path = require('path')
 const { uIOhook, UiohookKey } = require('uiohook-napi')
@@ -14,6 +14,7 @@ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
 
 const NOTCH_WIDTH = 300
 const NOTCH_HEIGHT = 32
+const MAX_APPROVAL_HEIGHT = 360
 const HARNESS_UI_WS_URL = 'ws://127.0.0.1:8766'
 const ALT_TRIPLE_WINDOW_MS = 600
 
@@ -27,14 +28,15 @@ let altPressTimer = null
 let altDown = false
 let xDown = false
 let pushToTalkActive = false
+let approvalPending = false
 
-function getNotchBounds() {
+function getNotchBounds(height = NOTCH_HEIGHT) {
   const primaryDisplay = screen.getPrimaryDisplay()
   const { x, width } = primaryDisplay.bounds
 
   return {
     width: NOTCH_WIDTH,
-    height: NOTCH_HEIGHT,
+    height,
     x: x + Math.floor((width - NOTCH_WIDTH) / 2),
     y: 0,
   }
@@ -105,12 +107,12 @@ function loadRenderer(win) {
   )
 }
 
-function showNotch() {
+function showNotch(height = NOTCH_HEIGHT) {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return
   }
 
-  mainWindow.setBounds(getNotchBounds())
+  mainWindow.setBounds(getNotchBounds(height))
   mainWindow.setAlwaysOnTop(true, 'screen-saver')
   mainWindow.showInactive()
   mainWindow.moveTop()
@@ -134,10 +136,11 @@ function sendRendererEvent(msg) {
 
 function sendToHarness(msg) {
   if (!harnessWs || harnessWs.readyState !== WebSocket.OPEN) {
-    return
+    return false
   }
 
   harnessWs.send(JSON.stringify(msg))
+  return true
 }
 
 function setAlwaysOnMode(enabled) {
@@ -271,13 +274,21 @@ function connectHarnessWebSocket() {
       currentState = msg.state
     }
 
+    if (msg.type === 'approval_request') {
+      approvalPending = true
+      showNotch(MAX_APPROVAL_HEIGHT)
+    }
+
     sendRendererEvent(msg)
 
     if (msg.type === 'dismiss') {
+      approvalPending = false
       setTimeout(() => {
         if (!alwaysOnMode && !pushToTalkActive) {
           hideNotch()
+          return
         }
+        showNotch(NOTCH_HEIGHT)
       }, 180)
     }
   })
@@ -299,6 +310,23 @@ function scheduleHarnessReconnect() {
     connectHarnessWebSocket()
   }, 1000)
 }
+
+ipcMain.handle('send-to-harness', (_, msg) => {
+  if (msg?.type === 'approval_response') {
+    approvalPending = false
+    showNotch(NOTCH_HEIGHT)
+  }
+  return sendToHarness(msg)
+})
+
+ipcMain.handle('resize-approval', (_, height) => {
+  if (!approvalPending) {
+    return false
+  }
+  const nextHeight = Math.max(NOTCH_HEIGHT, Math.min(Number(height) || NOTCH_HEIGHT, MAX_APPROVAL_HEIGHT))
+  showNotch(nextHeight)
+  return true
+})
 
 app.whenReady().then(() => {
   console.log('Electron ready')
