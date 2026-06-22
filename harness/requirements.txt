@@ -6,6 +6,7 @@ python-dotenv
 composio
 sounddevice
 numpy
+mss
 pywin32
 comtypes
 azure-cognitiveservices-speech

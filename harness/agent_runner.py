@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from agents.calendar_agent import book_meeting, find_free_slots, get_schedule, reschedule_meeting
+from agents.canvas_vision_agent import plan_visual_explanation
 from agents.email_agent import check_access, draft_and_send, reply_to_thread, summarize_thread, triage_inbox
 from agents.slack_agent import read_messages, send_message
 from agents.system_agent import launch_app
@@ -51,6 +52,8 @@ class AgentRunner:
                 result = await self._run_slack(task, context)
             elif hint == "calendar":
                 result = await self._run_calendar(task, context)
+            elif hint == "canvas_vision":
+                result = await self._run_canvas_vision(task, context)
             else:
                 result = {
                     "success": False,
@@ -74,6 +77,9 @@ class AgentRunner:
                 "result": result,
             },
         )
+
+    async def _run_canvas_vision(self, task: str, context: str) -> dict[str, Any]:
+        return await plan_visual_explanation(task, context)
 
     def _run_deterministic(
         self,

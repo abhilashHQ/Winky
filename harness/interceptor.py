@@ -6,7 +6,9 @@ import uuid
 from typing import Any
 
 from agent_runner import AgentRunner
+from canvas_types import normalize_canvas_step
 from result_queue import ResultQueue
+from screen_context import capture_active_monitor
 from state import StateMachine
 
 logger = logging.getLogger(__name__)
@@ -31,22 +33,40 @@ class ToolInterceptor:
         if name == "spawn_agent":
             await self._handle_spawn_agent(ws, call_id, args)
         elif name == "get_screen_context":
-            await self._send_tool_result(
-                ws,
-                call_id,
-                {
-                    "status": "mock",
-                    "message": "Screen context is not implemented yet.",
-                },
-            )
+            try:
+                result = capture_active_monitor()
+            except Exception:
+                logger.exception("Screen capture failed")
+                result = {
+                    "status": "error",
+                    "message": "I couldn't capture the screen.",
+                }
+            await self._send_tool_result(ws, call_id, result)
         elif name == "draw_annotation":
+            step = args.get("step")
+            if not isinstance(step, dict):
+                await self._send_tool_result(
+                    ws,
+                    call_id,
+                    {
+                        "status": "error",
+                        "message": "draw_annotation requires a step object.",
+                    },
+                )
+                return
+            normalized_step = normalize_canvas_step(step)
+            await self.state_machine.broadcast_canvas_event(
+                {
+                    "type": "draw_annotation",
+                    "step": normalized_step,
+                }
+            )
             await self._send_tool_result(
                 ws,
                 call_id,
                 {
-                    "status": "mock",
-                    "message": "Canvas annotations are not implemented yet.",
-                    "step": args.get("step"),
+                    "status": "ok",
+                    "drawn": len(normalized_step["annotations"]),
                 },
             )
         elif name == "start_dictation":
