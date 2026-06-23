@@ -31,7 +31,7 @@ from agent_runner import AgentRunner
 from canvas_types import normalize_canvas_step
 from interceptor import ToolInterceptor
 from result_queue import ResultQueue
-from screen_context import find_monitor_for_point
+from screen_context import compress_image_for_realtime, find_monitor_for_point
 from state import StateMachine
 
 
@@ -51,6 +51,17 @@ def test_find_monitor_for_point_falls_back_to_first_monitor():
     ]
 
     assert find_monitor_for_point(monitors, -50, -50) == monitors[0]
+
+
+def test_compress_image_for_realtime_bounds_payload_size():
+    raw_rgb = bytes([255, 0, 0]) * 1920 * 1080
+
+    compressed = compress_image_for_realtime(raw_rgb, (1920, 1080), max_long_edge=768, jpeg_quality=55)
+
+    assert compressed["mime_type"] == "image/jpeg"
+    assert compressed["width"] == 768
+    assert compressed["height"] == 432
+    assert len(compressed["base64"]) < 1_048_576
 
 
 def test_normalize_canvas_step_wraps_single_annotation():
@@ -175,7 +186,7 @@ async def test_get_screen_context_returns_capture(monkeypatch):
             "target": "active_monitor",
             "coordinate_space": "monitor_relative",
             "monitor": {"x": 0, "y": 0, "width": 100, "height": 80, "scale_factor": 1.0},
-            "image": {"mime_type": "image/png", "base64": "abc"},
+            "image": {"mime_type": "image/png", "base64": "abc", "width": 100, "height": 80},
         },
     )
     state_machine = StateMachine()
@@ -193,8 +204,18 @@ async def test_get_screen_context_returns_capture(monkeypatch):
     )
 
     output = json.loads(ws.sent[0]["item"]["output"])
-    assert output["status"] == "ok"
-    assert output["monitor"]["width"] == 100
+    assert output == {
+        "status": "ok",
+        "target": "active_monitor",
+        "coordinate_space": "monitor_relative",
+        "monitor": {"x": 0, "y": 0, "width": 100, "height": 80, "scale_factor": 1.0},
+        "image": {"mime_type": "image/png", "width": 100, "height": 80},
+        "vision_context": "A screen image was attached as a conversation image immediately before this tool result.",
+    }
+    image_message = ws.sent[1]
+    assert image_message["type"] == "conversation.item.create"
+    assert image_message["item"]["content"][0]["type"] == "input_image"
+    assert image_message["item"]["content"][0]["image_url"] == "data:image/png;base64,abc"
 
 
 @pytest.mark.asyncio

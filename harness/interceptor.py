@@ -41,7 +41,9 @@ class ToolInterceptor:
                     "status": "error",
                     "message": "I couldn't capture the screen.",
                 }
-            await self._send_tool_result(ws, call_id, result)
+                await self._send_tool_result(ws, call_id, result)
+                return
+            await self._send_screen_context_result(ws, call_id, result)
         elif name == "draw_annotation":
             step = args.get("step")
             if not isinstance(step, dict):
@@ -123,6 +125,50 @@ class ToolInterceptor:
             logger.warning("spawn_agent ACK took %.2fms", elapsed_ms)
         else:
             logger.debug("spawn_agent ACK took %.2fms", elapsed_ms)
+
+    async def _send_screen_context_result(
+        self,
+        ws: Any,
+        call_id: str,
+        result: dict[str, Any],
+    ) -> None:
+        image = result.get("image")
+        if not isinstance(image, dict):
+            await self._send_tool_result(ws, call_id, result)
+            return
+
+        image_base64 = str(image.get("base64", ""))
+        mime_type = str(image.get("mime_type", "image/jpeg"))
+        tool_result = {
+            "status": result.get("status"),
+            "target": result.get("target"),
+            "coordinate_space": result.get("coordinate_space"),
+            "monitor": result.get("monitor"),
+            "image": {
+                "mime_type": mime_type,
+                "width": image.get("width"),
+                "height": image.get("height"),
+            },
+            "vision_context": "A screen image was attached as a conversation image immediately before this tool result.",
+        }
+        await self._send_tool_result(ws, call_id, tool_result)
+        await ws.send(
+            json.dumps(
+                {
+                    "type": "conversation.item.create",
+                    "item": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:{mime_type};base64,{image_base64}",
+                            }
+                        ],
+                    },
+                }
+            )
+        )
 
     async def _handle_approval_gate(
         self,
