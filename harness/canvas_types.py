@@ -3,8 +3,17 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_KINDS = {"line", "arrow", "rect", "circle", "text", "formula", "triangle", "clear"}
-_POINT_KINDS = {"line", "arrow", "triangle"}
+SUPPORTED_KINDS = {"line", "arrow", "rect", "circle", "text", "formula", "triangle", "polygon", "clear"}
+KIND_ALIASES = {
+    "rectangle": "rect",
+    "box": "rect",
+    "square": "rect",
+    "ellipse": "circle",
+    "oval": "circle",
+    "label": "text",
+    "math": "formula",
+}
+_POINT_KINDS = {"line", "arrow", "triangle", "polygon"}
 _BOX_KINDS = {"rect", "circle"}
 _TEXT_KINDS = {"text", "formula"}
 
@@ -36,7 +45,8 @@ def _normalize_annotation(
     width: int | None,
     height: int | None,
 ) -> dict[str, Any] | None:
-    kind = str(raw_annotation.get("kind", "")).strip().lower()
+    kind = str(raw_annotation.get("kind", raw_annotation.get("shape", raw_annotation.get("type", "")))).strip().lower()
+    kind = KIND_ALIASES.get(kind, kind)
     if kind not in SUPPORTED_KINDS:
         logger.warning("Ignoring unsupported canvas annotation kind: %s", kind)
         return None
@@ -69,6 +79,9 @@ def _normalize_annotation(
             ]
         if kind == "triangle" and len(points) != 3:
             logger.warning("Ignoring triangle with %s points", len(points))
+            return None
+        if kind == "polygon" and len(points) < 3:
+            logger.warning("Ignoring polygon with %s points", len(points))
             return None
         if kind in {"line", "arrow"} and len(points) < 2:
             logger.warning("Ignoring %s with %s points", kind, len(points))

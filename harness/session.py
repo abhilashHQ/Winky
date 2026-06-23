@@ -67,7 +67,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "properties": {
                 "step": {
                     "type": "object",
-                    "description": "One annotation object or {annotations:[...]}. Supported kinds: line, arrow, rect, circle, text, formula, triangle, clear.",
+                    "description": "One annotation object or {annotations:[...]}. Supported kinds: line, arrow, rect/rectangle, circle/ellipse, text, formula, triangle, polygon, clear.",
                 }
             },
             "required": ["step"],

@@ -49,7 +49,7 @@ function Annotation({ annotation }) {
     return <ellipse className="canvas-shape" cx={annotation.x + annotation.w / 2} cy={annotation.y + annotation.h / 2} rx={annotation.w / 2} ry={annotation.h / 2} fill={style.fill} stroke={style.stroke} strokeWidth={style.strokeWidth} />
   }
 
-  if (annotation.kind === 'triangle') {
+  if (annotation.kind === 'triangle' || annotation.kind === 'polygon') {
     return <polygon className="canvas-shape" points={pointsToString(annotation.points)} fill={style.fill} stroke={style.stroke} strokeWidth={style.strokeWidth} />
   }
 

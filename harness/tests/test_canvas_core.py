@@ -80,6 +80,29 @@ def test_normalize_canvas_step_wraps_single_annotation():
     }
 
 
+def test_normalize_canvas_step_accepts_rectangle_alias():
+    step = normalize_canvas_step({"kind": "rectangle", "x": 10, "y": 20, "width": 30, "height": 40})
+
+    assert step == {
+        "annotations": [
+            {
+                "kind": "rect",
+                "x": 10,
+                "y": 20,
+                "w": 30,
+                "h": 40,
+                "style": {},
+            }
+        ]
+    }
+
+
+def test_normalize_canvas_step_accepts_shape_field():
+    step = normalize_canvas_step({"shape": "rectangle", "x": 10, "y": 20, "width": 30, "height": 40})
+
+    assert step["annotations"][0]["kind"] == "rect"
+
+
 def test_normalize_canvas_step_accepts_width_height_aliases():
     step = normalize_canvas_step({"kind": "rect", "x": 10, "y": 20, "width": 30, "height": 40})
 
