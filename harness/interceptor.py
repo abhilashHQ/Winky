@@ -72,6 +72,7 @@ class ToolInterceptor:
                 )
                 return
             monitor = args.get("monitor")
+            logger.info("Broadcasting canvas annotation: %s", normalized_step)
             await self.state_machine.broadcast_canvas_event(
                 {
                     "type": "draw_annotation",

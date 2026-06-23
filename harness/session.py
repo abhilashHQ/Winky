@@ -268,17 +268,18 @@ class RT2Session:
             elif event_type == "response.done":
                 self._response_active = False
                 self._reset_turn_submission_flags()
+                injected = await self.result_queue.inject_next(ws)
+                if injected:
+                    continue
                 if self._tool_result_pending_response:
                     await self._create_audio_response(force=True)
                     self._tool_result_pending_response = False
                     continue
-                injected = await self.result_queue.inject_next(ws)
-                if not injected:
-                    if self.state_machine.voice_input_mode == "always_on" and self.state_machine.voice_input_active:
-                        await self.state_machine.listening()
-                    else:
-                        await self.state_machine.idle()
-                        await self.state_machine.dismiss()
+                if self.state_machine.voice_input_mode == "always_on" and self.state_machine.voice_input_active:
+                    await self.state_machine.listening()
+                else:
+                    await self.state_machine.idle()
+                    await self.state_machine.dismiss()
             elif event_type == "error":
                 self._reset_runtime_flags()
                 logger.error("RT2 error: %s", event)

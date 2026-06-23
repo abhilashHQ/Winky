@@ -207,6 +207,7 @@ function sendCanvasEvent(msg) {
     return false
   }
 
+  console.log('Forwarding canvas event', JSON.stringify(msg.step || msg))
   canvasWindow.webContents.send('canvas-event', msg)
   return true
 }

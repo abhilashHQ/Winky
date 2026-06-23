@@ -56,6 +56,17 @@ def _normalize_annotation(
 
     if kind in _POINT_KINDS:
         points = _normalize_points(raw_annotation.get("points"), width, height)
+        if not points and all(key in raw_annotation for key in ("x1", "y1", "x2", "y2")):
+            points = [
+                {
+                    "x": _clamp_number(raw_annotation.get("x1"), 0, width),
+                    "y": _clamp_number(raw_annotation.get("y1"), 0, height),
+                },
+                {
+                    "x": _clamp_number(raw_annotation.get("x2"), 0, width),
+                    "y": _clamp_number(raw_annotation.get("y2"), 0, height),
+                },
+            ]
         if kind == "triangle" and len(points) != 3:
             logger.warning("Ignoring triangle with %s points", len(points))
             return None
@@ -69,10 +80,8 @@ def _normalize_annotation(
         return annotation
 
     if kind in _BOX_KINDS:
-        annotation["x"] = _clamp_number(raw_annotation.get("x"), 0, width)
-        annotation["y"] = _clamp_number(raw_annotation.get("y"), 0, height)
-        annotation["w"] = _clamp_number(raw_annotation.get("w"), 0, width)
-        annotation["h"] = _clamp_number(raw_annotation.get("h"), 0, height)
+        box = _normalize_box(raw_annotation, width, height)
+        annotation.update(box)
         return annotation
 
     if kind in _TEXT_KINDS:
@@ -82,6 +91,20 @@ def _normalize_annotation(
         return annotation
 
     return annotation
+
+
+def _normalize_box(
+    raw_annotation: dict[str, Any],
+    width: int | None,
+    height: int | None,
+) -> dict[str, float | int]:
+    x = _clamp_number(raw_annotation.get("x"), 0, width)
+    y = _clamp_number(raw_annotation.get("y"), 0, height)
+    raw_w = raw_annotation.get("w", raw_annotation.get("width", 0))
+    raw_h = raw_annotation.get("h", raw_annotation.get("height", 0))
+    w = _clamp_number(raw_w, 0, width)
+    h = _clamp_number(raw_h, 0, height)
+    return {"x": x, "y": y, "w": w, "h": h}
 
 
 def _normalize_points(

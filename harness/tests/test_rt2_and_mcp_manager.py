@@ -113,6 +113,24 @@ async def test_always_on_response_done_returns_to_listening_not_idle():
 
 
 @pytest.mark.asyncio
+async def test_queued_agent_result_injects_before_tool_followup(monkeypatch):
+    session = RT2Session(harness_dir=HARNESS_DIR)
+    ws = FakeWebSocket([{"type": "response.done"}, {"type": "response.done"}])
+    session._ws = ws
+    session.ready.set()
+    session._tool_result_pending_response = True
+    await session.result_queue.put("call-agent", {"result": "done"})
+
+    await session._receive_events(ws)
+
+    assert [message["type"] for message in ws.sent] == [
+        "conversation.item.create",
+        "response.create",
+        "response.create",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_always_on_speech_stop_with_no_audio_sends_nothing():
     session = RT2Session(harness_dir=HARNESS_DIR)
     ws = FakeWebSocket([{"type": "input_audio_buffer.speech_stopped"}])

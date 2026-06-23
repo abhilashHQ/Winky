@@ -80,6 +80,37 @@ def test_normalize_canvas_step_wraps_single_annotation():
     }
 
 
+def test_normalize_canvas_step_accepts_width_height_aliases():
+    step = normalize_canvas_step({"kind": "rect", "x": 10, "y": 20, "width": 30, "height": 40})
+
+    assert step == {
+        "annotations": [
+            {
+                "kind": "rect",
+                "x": 10,
+                "y": 20,
+                "w": 30,
+                "h": 40,
+                "style": {},
+            }
+        ]
+    }
+
+
+def test_normalize_canvas_step_accepts_x1_y1_x2_y2_for_lines():
+    step = normalize_canvas_step({"kind": "arrow", "x1": 1, "y1": 2, "x2": 3, "y2": 4})
+
+    assert step == {
+        "annotations": [
+            {
+                "kind": "arrow",
+                "points": [{"x": 1, "y": 2}, {"x": 3, "y": 4}],
+                "style": {},
+            }
+        ]
+    }
+
+
 def test_normalize_canvas_step_accepts_missing_dimensions():
     step = normalize_canvas_step({"kind": "rect", "x": 10, "y": 20})
 
