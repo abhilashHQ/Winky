@@ -14,6 +14,7 @@ from state import StateMachine
 MUTATING_KEYWORDS = ("send", "create", "update", "delete", "remove", "draft", "reply", "trash")
 SEND_KEYWORDS = ("gmail", "send", "email")
 REPLY_KEYWORDS = ("gmail", "reply", "thread")
+GMAIL_META_TOOLS = {"COMPOSIO_SEARCH_TOOLS", "COMPOSIO_MULTI_EXECUTE_TOOL", "COMPOSIO_EXECUTE_TOOL"}
 
 
 class EmailAgent:
@@ -24,12 +25,107 @@ class EmailAgent:
     async def check_access(self) -> dict[str, Any]:
         proc = await self.mcp_manager.get_or_spawn("email")
         tools = await self.mcp_manager.list_tools(proc)
-        gmail_tools = [tool for tool in tools if "gmail" in str(tool.get("name", "")).lower()]
+        gmail_tools = [tool for tool in tools if _is_gmail_tool(tool)]
+        meta_tools = [tool for tool in tools if str(tool.get("name", "")) in GMAIL_META_TOOLS]
+        if not gmail_tools and not meta_tools:
+            return {
+                "success": False,
+                "has_access": False,
+                "tool_count": 0,
+                "message": "Gmail tools are not available. Authenticate the Gmail toolkit through Composio and retry.",
+            }
+
+        if not gmail_tools:
+            try:
+                await select_tool(
+                    self.mcp_manager,
+                    proc,
+                    required=("gmail",),
+                    preferred=("message", "list", "get"),
+                    avoid=MUTATING_KEYWORDS,
+                    error_label="Gmail access check",
+                    use_case="Check whether Gmail read tools are available for the connected user",
+                )
+            except RuntimeError as exc:
+                return {
+                    "success": False,
+                    "has_access": False,
+                    "tool_count": len(tools),
+                    "message": str(exc),
+                }
+
         return {
             "success": True,
             "has_access": True,
             "tool_count": len(gmail_tools) or len(tools),
             "message": "Gmail is connected and available.",
+        }
+
+    async def list_emails(self, query: str = "in:inbox", max_results: int = 25) -> dict[str, Any]:
+        query = query.strip() or "in:inbox"
+        max_results = _bounded_max_results(max_results)
+        proc = await self.mcp_manager.get_or_spawn("email")
+        tool = await select_tool(
+            self.mcp_manager,
+            proc,
+            required=("gmail",),
+            preferred=("email", "message", "list", "search"),
+            avoid=MUTATING_KEYWORDS,
+            error_label="Gmail email list",
+            use_case="List Gmail emails matching a Gmail query with id thread id sender subject date and snippet",
+        )
+        response = await call_selected_tool(
+            self.mcp_manager,
+            proc,
+            tool,
+            args_for_tool(
+                tool,
+                f"List up to {max_results} Gmail emails matching query: {query}. Include id, thread id, sender/from, subject, date, and body snippet. Read only.",
+                max_results=max_results,
+                query=query,
+            ),
+            "GMAIL_LIST_EMAILS",
+        )
+        return {
+            "success": True,
+            "task": "list_emails",
+            "query": query,
+            "emails": _normalize_emails(extract_payload(response)),
+        }
+
+    async def search_emails(self, query: str, max_results: int = 10) -> dict[str, Any]:
+        query = query.strip()
+        if not query:
+            raise ValueError("Gmail search requires a query.")
+        result = await self.list_emails(query=query, max_results=max_results)
+        result["task"] = "search_emails"
+        return result
+
+    async def read_email(self, identifier: str) -> dict[str, Any]:
+        identifier = _clean_identifier(identifier)
+        prefer_direct_fetch = False
+        if not identifier:
+            latest = await self.list_emails(query="in:inbox", max_results=1)
+            emails = latest.get("emails", [])
+            if not emails:
+                return {
+                    "success": True,
+                    "task": "read_email",
+                    "thread_id": "",
+                    "messages": [],
+                    "message": "No inbox emails were found.",
+                }
+            first_email = emails[0]
+            identifier = first_email.get("thread_id") or first_email.get("id") or first_email.get("subject", "")
+            prefer_direct_fetch = bool(first_email.get("thread_id") or first_email.get("id"))
+
+        thread = await self._fetch_thread(identifier, prefer_direct_fetch=prefer_direct_fetch)
+        return {
+            "success": True,
+            "task": "read_email",
+            "identifier": identifier,
+            "thread_id": thread["thread_id"],
+            "messages": thread["messages"],
         }
 
     async def triage_inbox(self) -> dict[str, list[dict[str, str]]]:
@@ -88,6 +184,22 @@ class EmailAgent:
 
     async def draft_and_send(self, dictated_content: dict[str, str]) -> dict[str, Any]:
         draft = await _polish_email_with_gpt55(dictated_content)
+        return await self._send_approved_email(draft, task_name="draft_and_send")
+
+    async def send_email(self, recipient: str, subject: str, body: str) -> dict[str, Any]:
+        draft = {
+            "recipient": recipient.strip(),
+            "subject": subject.strip(),
+            "body": body.strip(),
+        }
+        return await self._send_approved_email(draft, task_name="send_email")
+
+    async def _send_approved_email(self, draft: dict[str, str], task_name: str) -> dict[str, Any]:
+        if not draft["recipient"]:
+            raise ValueError("Email recipient is required.")
+        if not draft["body"]:
+            raise ValueError("Email body is required.")
+
         preview = _approval_preview(draft["recipient"], draft["subject"], draft["body"])
         approved = await self._request_approval(preview, "send_email")
         if not approved:
@@ -124,7 +236,7 @@ class EmailAgent:
         )
         return {
             "success": True,
-            "task": "draft_and_send",
+            "task": task_name,
             "draft": draft,
             "send_result": extract_payload(response),
         }
@@ -177,7 +289,7 @@ class EmailAgent:
             "send_result": extract_payload(response),
         }
 
-    async def _fetch_thread(self, identifier: str) -> dict[str, Any]:
+    async def _fetch_thread(self, identifier: str, prefer_direct_fetch: bool = False) -> dict[str, Any]:
         identifier = _clean_identifier(identifier)
         if not identifier:
             inbox = await self.triage_inbox()
@@ -185,6 +297,14 @@ class EmailAgent:
             return {"thread_id": "inbox", "messages": messages}
 
         proc = await self.mcp_manager.get_or_spawn("email")
+        if prefer_direct_fetch:
+            try:
+                direct_thread = await self._fetch_thread_by_id(proc, identifier)
+                if direct_thread["messages"]:
+                    return direct_thread
+            except RuntimeError:
+                pass
+
         search_tool = await select_tool(
             self.mcp_manager,
             proc,
@@ -211,27 +331,8 @@ class EmailAgent:
 
         thread_id = _best_thread_id(payload)
         if thread_id and not messages:
-            get_tool = await select_tool(
-                self.mcp_manager,
-                proc,
-                required=("gmail",),
-                preferred=("thread", "get", "fetch", "message"),
-                avoid=MUTATING_KEYWORDS,
-                error_label="Gmail fetch thread",
-                use_case="Fetch a full Gmail thread by thread id with all messages sender date subject and body",
-            )
-            thread_response = await call_selected_tool(
-                self.mcp_manager,
-                proc,
-                get_tool,
-                args_for_tool(
-                    get_tool,
-                    f"Fetch the full Gmail thread {thread_id}. Include all messages with sender, date, subject, and body. Read only.",
-                    thread_id=thread_id,
-                ),
-                "GMAIL_FETCH_THREAD",
-            )
-            payload = extract_payload(thread_response)
+            fetched_thread = await self._fetch_thread_by_id(proc, thread_id)
+            payload = fetched_thread["payload"]
             messages = _normalize_thread_messages(payload)
 
         if not messages:
@@ -249,6 +350,34 @@ class EmailAgent:
 
         return {"thread_id": thread_id or "search", "messages": messages}
 
+    async def _fetch_thread_by_id(self, proc: Any, thread_id: str) -> dict[str, Any]:
+        get_tool = await select_tool(
+            self.mcp_manager,
+            proc,
+            required=("gmail",),
+            preferred=("thread", "get", "fetch", "message"),
+            avoid=MUTATING_KEYWORDS,
+            error_label="Gmail fetch thread",
+            use_case="Fetch a full Gmail thread by thread id with all messages sender date subject and body",
+        )
+        thread_response = await call_selected_tool(
+            self.mcp_manager,
+            proc,
+            get_tool,
+            args_for_tool(
+                get_tool,
+                f"Fetch the full Gmail thread {thread_id}. Include all messages with sender, date, subject, and body. Read only.",
+                thread_id=thread_id,
+            ),
+            "GMAIL_FETCH_THREAD",
+        )
+        payload = extract_payload(thread_response)
+        return {
+            "thread_id": thread_id,
+            "messages": _normalize_thread_messages(payload),
+            "payload": payload,
+        }
+
     async def _request_approval(self, preview: str, action_type: str) -> bool:
         if self.state_machine is None:
             raise RuntimeError("Approval requires StateMachine.")
@@ -263,6 +392,26 @@ class EmailAgent:
 
 async def check_access(mcp_manager: MCPManager) -> dict[str, Any]:
     return await EmailAgent(mcp_manager).check_access()
+
+
+async def list_emails(
+    mcp_manager: MCPManager,
+    query: str = "in:inbox",
+    max_results: int = 25,
+) -> dict[str, Any]:
+    return await EmailAgent(mcp_manager).list_emails(query=query, max_results=max_results)
+
+
+async def search_emails(
+    mcp_manager: MCPManager,
+    query: str,
+    max_results: int = 10,
+) -> dict[str, Any]:
+    return await EmailAgent(mcp_manager).search_emails(query=query, max_results=max_results)
+
+
+async def read_email(mcp_manager: MCPManager, identifier: str) -> dict[str, Any]:
+    return await EmailAgent(mcp_manager).read_email(identifier)
 
 
 async def triage_inbox(mcp_manager: MCPManager) -> dict[str, list[dict[str, str]]]:
@@ -282,6 +431,16 @@ async def draft_and_send(
     dictated_content: dict[str, str],
 ) -> dict[str, Any]:
     return await EmailAgent(mcp_manager, state_machine).draft_and_send(dictated_content)
+
+
+async def send_email(
+    mcp_manager: MCPManager,
+    state_machine: StateMachine,
+    recipient: str,
+    subject: str,
+    body: str,
+) -> dict[str, Any]:
+    return await EmailAgent(mcp_manager, state_machine).send_email(recipient, subject, body)
 
 
 async def reply_to_thread(
@@ -361,6 +520,22 @@ async def _chat_gpt55(
     return str(response.json()["choices"][0]["message"]["content"]).strip()
 
 
+def _is_gmail_tool(tool: dict[str, Any]) -> bool:
+    haystack = " ".join(
+        str(tool.get(key, ""))
+        for key in ("name", "title", "description")
+    ).lower()
+    return "gmail" in haystack
+
+
+def _bounded_max_results(value: int) -> int:
+    try:
+        normalized_value = int(value)
+    except (TypeError, ValueError):
+        normalized_value = 25
+    return min(100, max(1, normalized_value))
+
+
 def _clean_identifier(identifier: str) -> str:
     cleaned = identifier.strip().strip('"\'')
     lowered = cleaned.lower()
@@ -421,7 +596,10 @@ def _normalize_emails(payload: Any) -> list[dict[str, str]]:
             return []
 
     if isinstance(payload, dict):
-        items = payload.get("emails") or payload.get("messages") or payload.get("items") or payload.get("data") or []
+        items = payload.get("emails") or payload.get("messages") or payload.get("items") or payload.get("data")
+        if items is None and any(key in payload for key in ("id", "thread_id", "threadId", "subject", "snippet")):
+            items = [payload]
+        items = items or []
     elif isinstance(payload, list):
         items = payload
     else:
@@ -444,6 +622,7 @@ def _normalize_emails(payload: Any) -> list[dict[str, str]]:
                 "thread_id": str(item.get("thread_id") or item.get("threadId") or ""),
                 "subject": str(item.get("subject", "(no subject)")),
                 "sender": str(item.get("sender") or item.get("from") or "unknown sender"),
+                "sent_at": str(item.get("sent_at") or item.get("date") or item.get("internalDate") or ""),
                 "body_preview": body[:200],
             }
         )
@@ -489,7 +668,10 @@ def _normalize_thread_messages(payload: Any) -> list[dict[str, str]]:
             return [{"sender": "unknown sender", "sent_at": "", "subject": "", "body": _clean_body(payload)}]
 
     if isinstance(payload, dict):
-        items = payload.get("messages") or payload.get("emails") or payload.get("items") or payload.get("data") or []
+        items = payload.get("messages") or payload.get("emails") or payload.get("items") or payload.get("data")
+        if items is None and any(key in payload for key in ("id", "thread_id", "threadId", "subject", "body", "snippet")):
+            items = [payload]
+        items = items or []
     elif isinstance(payload, list):
         items = payload
     else:

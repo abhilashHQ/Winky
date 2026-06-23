@@ -5,7 +5,17 @@ from typing import Any
 
 from agents.calendar_agent import book_meeting, find_free_slots, get_schedule, reschedule_meeting
 from agents.canvas_vision_agent import plan_visual_explanation
-from agents.email_agent import check_access, draft_and_send, reply_to_thread, summarize_thread, triage_inbox
+from agents.email_agent import (
+    check_access,
+    draft_and_send,
+    list_emails,
+    read_email,
+    reply_to_thread,
+    search_emails,
+    send_email,
+    summarize_thread,
+    triage_inbox,
+)
 from agents.slack_agent import read_messages, send_message
 from agents.system_agent import launch_app
 from mcp_manager import MCPManager
@@ -102,6 +112,12 @@ class AgentRunner:
 
         text = " ".join(part for part in (task, context) if part).strip()
         lowered = text.lower()
+        structured_task = self._parse_json_object(task) or self._parse_json_object(text)
+        if structured_task is not None:
+            structured_result = await self._run_structured_email(structured_task)
+            if structured_result is not None:
+                return structured_result
+
         if lowered.startswith("learn urgency preference:"):
             correction = text.split(":", 1)[1].strip()
             return learn_preference(correction)
@@ -124,12 +140,6 @@ class AgentRunner:
                 identifier,
                 intent,
             )
-        if "triage" in lowered or "inbox" in lowered or "urgent email" in lowered or "read email" in lowered or "emails" in lowered:
-            return {
-                "success": True,
-                "task": "triage_inbox",
-                "buckets": await triage_inbox(self.mcp_manager),
-            }
         if "summarize" in lowered or "summary" in lowered or "thread" in lowered:
             identifier = self._thread_identifier_from_task(text)
             return {
@@ -137,11 +147,82 @@ class AgentRunner:
                 "task": "summarize_thread",
                 **await summarize_thread(self.mcp_manager, identifier),
             }
+        if self._is_email_search_request(lowered):
+            return await search_emails(
+                self.mcp_manager,
+                self._gmail_query_from_task(text),
+                max_results=10,
+            )
+        if self._is_email_read_request(lowered):
+            return await read_email(self.mcp_manager, self._email_identifier_from_task(text))
+        if "triage" in lowered or "urgent email" in lowered:
+            return {
+                "success": True,
+                "task": "triage_inbox",
+                "buckets": await triage_inbox(self.mcp_manager),
+            }
+        if "inbox" in lowered or "email" in lowered or "emails" in lowered:
+            return await list_emails(self.mcp_manager, query=self._gmail_query_from_task(text), max_results=25)
 
         return {
             "success": False,
-            "message": "Email task is not implemented yet. Phase 1 currently supports inbox triage, thread summaries, and urgency preference learning only.",
+            "message": "Email task is not implemented yet. Supported Gmail tasks: check access, list, search, read, summarize, send, reply, and triage.",
         }
+
+    async def _run_structured_email(self, task: dict[str, Any]) -> dict[str, Any] | None:
+        action = str(task.get("action") or task.get("task") or "").strip().lower()
+        if not action:
+            return None
+
+        if action in {"check_access", "gmail_access"}:
+            return await check_access(self.mcp_manager)
+        if action in {"list_emails", "list", "inbox"}:
+            return await list_emails(
+                self.mcp_manager,
+                query=str(task.get("query") or "in:inbox"),
+                max_results=self._int_from_task(task.get("max_results"), default=25),
+            )
+        if action in {"search_emails", "search"}:
+            return await search_emails(
+                self.mcp_manager,
+                query=str(task.get("query") or task.get("identifier") or ""),
+                max_results=self._int_from_task(task.get("max_results"), default=10),
+            )
+        if action in {"read_email", "read"}:
+            return await read_email(
+                self.mcp_manager,
+                str(task.get("identifier") or task.get("thread_id") or task.get("message_id") or task.get("query") or ""),
+            )
+        if action in {"summarize_thread", "summarize"}:
+            identifier = str(task.get("identifier") or task.get("query") or "")
+            return {
+                "success": True,
+                "task": "summarize_thread",
+                **await summarize_thread(self.mcp_manager, identifier),
+            }
+        if action in {"send_email", "send"}:
+            return await send_email(
+                self.mcp_manager,
+                self.state_machine,
+                recipient=str(task.get("recipient") or task.get("to") or ""),
+                subject=str(task.get("subject") or ""),
+                body=str(task.get("body") or task.get("message") or ""),
+            )
+        if action in {"draft_and_send", "compose_email", "compose"}:
+            return await draft_and_send(
+                self.mcp_manager,
+                self.state_machine,
+                self._dictated_email_from_task(json.dumps(task)),
+            )
+        if action in {"reply_to_thread", "reply"}:
+            return await reply_to_thread(
+                self.mcp_manager,
+                self.state_machine,
+                str(task.get("identifier") or task.get("thread_id") or task.get("query") or ""),
+                str(task.get("dictated_intent") or task.get("body") or task.get("message") or ""),
+            )
+
+        return None
 
     async def _run_slack(self, task: str, context: str) -> dict[str, Any]:
         if self.mcp_manager is None:
@@ -227,6 +308,24 @@ class AgentRunner:
         }
 
     @staticmethod
+    def _parse_json_object(text: str) -> dict[str, Any] | None:
+        if not text.strip():
+            return None
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    @staticmethod
+    def _int_from_task(value: Any, default: int) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = default
+        return min(100, max(1, parsed))
+
+    @staticmethod
     def _is_email_access_check(lowered: str) -> bool:
         access_phrases = (
             "access to my gmail",
@@ -237,6 +336,69 @@ class AgentRunner:
             "do you have access",
         )
         return any(phrase in lowered for phrase in access_phrases) and "gmail" in lowered
+
+    @staticmethod
+    def _is_email_search_request(lowered: str) -> bool:
+        return any(
+            phrase in lowered
+            for phrase in (
+                "search gmail",
+                "search email",
+                "search emails",
+                "find email",
+                "find emails",
+                "emails from",
+                "email from",
+            )
+        )
+
+    @staticmethod
+    def _is_email_read_request(lowered: str) -> bool:
+        if "read" not in lowered and "open" not in lowered and "show" not in lowered:
+            return False
+        return "gmail" in lowered or "email" in lowered or "message" in lowered or "thread" in lowered
+
+    @staticmethod
+    def _gmail_query_from_task(text: str) -> str:
+        lowered = text.lower()
+        if "unread" in lowered:
+            return "is:unread"
+        if "latest" in lowered or "recent" in lowered or "inbox" in lowered:
+            return "in:inbox"
+
+        patterns = (
+            r"(?:search|find)\s+(?:gmail|emails?|messages?)\s+(?:for|about|matching)\s+(.+)$",
+            r"(?:emails?|messages?)\s+from\s+(.+)$",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+            if not match:
+                continue
+            query = match.group(1).strip(" .")
+            if query:
+                return query
+
+        return "in:inbox"
+
+    @staticmethod
+    def _email_identifier_from_task(text: str) -> str:
+        lowered = text.lower()
+        if "latest" in lowered or "most recent" in lowered:
+            return ""
+
+        patterns = (
+            r"(?:read|open|show)\s+(?:gmail\s+)?(?:email|message|thread)\s+(?:from|about|with|for)?\s*(.+)$",
+            r"(?:read|open|show)\s+(.+)$",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+            if not match:
+                continue
+            identifier = match.group(1).strip(" .")
+            if identifier and identifier.lower() not in {"email", "emails", "gmail", "message", "messages"}:
+                return identifier
+
+        return ""
 
     @staticmethod
     def _reply_parts_from_task(text: str) -> tuple[str, str]:

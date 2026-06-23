@@ -26,9 +26,13 @@ except ImportError:
     sys.modules["composio"] = composio_module
 
 import mcp_manager
+import agent_runner
+from agents.composio_tools import select_tool
+from agents.email_agent import EmailAgent
 from agent_runner import AgentRunner
 from agents.email_agent import _clean_identifier
 from mcp_manager import MCPManager
+from state import StateMachine
 from session import RT2Session
 from state import HarnessState
 
@@ -199,6 +203,68 @@ def test_email_access_check_routes_before_summary_or_inbox():
 def test_clean_identifier_drops_generic_gmail_requests():
     assert _clean_identifier("do you have access to my gmail") == ""
     assert _clean_identifier("summarize email thread from Alice") == "from Alice"
+
+
+@pytest.mark.asyncio
+async def test_email_access_reports_unavailable_without_gmail_tools():
+    class FakeMCPManager:
+        async def get_or_spawn(self, hint):
+            return object()
+
+        async def list_tools(self, proc):
+            return [{"name": "OTHER_TOOL"}]
+
+    result = await EmailAgent(FakeMCPManager()).check_access()
+
+    assert result["success"] is False
+    assert result["has_access"] is False
+    assert "Gmail tools are not available" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_gmail_read_tool_selection_avoids_send_tools():
+    class FakeMCPManager:
+        async def list_tools(self, proc):
+            return [
+                {"name": "GMAIL_SEND_EMAIL", "description": "Send Gmail email"},
+                {"name": "GMAIL_LIST_EMAILS", "description": "List Gmail messages"},
+            ]
+
+    selected = await select_tool(
+        FakeMCPManager(),
+        object(),
+        required=("gmail",),
+        preferred=("email", "message", "list", "search"),
+        avoid=("send", "create", "update", "delete", "remove", "draft", "reply", "trash"),
+    )
+
+    assert selected["name"] == "GMAIL_LIST_EMAILS"
+
+
+@pytest.mark.asyncio
+async def test_agent_runner_structured_read_email_routes_to_read_tool(monkeypatch):
+    captured = {}
+
+    async def fake_read_email(mcp_manager, identifier):
+        captured["mcp_manager"] = mcp_manager
+        captured["identifier"] = identifier
+        return {"success": True, "task": "read_email"}
+
+    monkeypatch.setattr(agent_runner, "read_email", fake_read_email)
+    runner = AgentRunner(types.SimpleNamespace(), StateMachine())
+    fake_mcp_manager = object()
+    runner.set_mcp_manager(fake_mcp_manager)
+
+    result = await runner._run_email('{"action":"read_email","identifier":"thread-123"}', "")
+
+    assert result == {"success": True, "task": "read_email"}
+    assert captured == {"mcp_manager": fake_mcp_manager, "identifier": "thread-123"}
+
+
+@pytest.mark.asyncio
+async def test_send_email_requires_approval_state_machine():
+    with pytest.raises(RuntimeError, match="Approval requires StateMachine"):
+        await EmailAgent(types.SimpleNamespace()).send_email("to@example.com", "Subject", "Body")
 
 
 def test_email_tool_router_session_does_not_request_spotify(monkeypatch):
