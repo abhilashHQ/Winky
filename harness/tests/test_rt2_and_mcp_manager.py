@@ -82,6 +82,27 @@ async def test_always_on_speech_stop_with_no_audio_sends_nothing():
 
 
 @pytest.mark.asyncio
+async def test_session_failure_resets_response_active():
+    session = RT2Session(harness_dir=HARNESS_DIR)
+    session._response_active = True
+
+    session._reset_runtime_flags()
+
+    assert session._response_active is False
+
+
+@pytest.mark.asyncio
+async def test_error_event_resets_response_active():
+    session = RT2Session(harness_dir=HARNESS_DIR)
+    ws = FakeWebSocket([{"type": "error", "error": {"message": "boom"}}])
+    session._response_active = True
+
+    await session._receive_events(ws)
+
+    assert session._response_active is False
+
+
+@pytest.mark.asyncio
 async def test_always_on_server_vad_does_not_create_response_while_response_active():
     session = RT2Session(harness_dir=HARNESS_DIR)
     ws = FakeWebSocket(

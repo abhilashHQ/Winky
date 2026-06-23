@@ -114,6 +114,7 @@ def _clamp_number(value: Any, minimum: float, maximum: int | None) -> float | in
     if maximum is not None:
         number = min(number, float(maximum))
     number = max(number, float(minimum))
+    number = float(number)
 
     if number.is_integer():
         return int(number)

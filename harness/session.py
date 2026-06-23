@@ -165,7 +165,7 @@ class RT2Session:
             finally:
                 self.ready.clear()
                 self._ws = None
-                self._reset_turn_submission_flags()
+                self._reset_runtime_flags()
                 self._close_audio_streams()
 
             if not self._stop_event.is_set():
@@ -266,7 +266,7 @@ class RT2Session:
                     await self.state_machine.idle()
                     await self.state_machine.dismiss()
             elif event_type == "error":
-                self._reset_turn_submission_flags()
+                self._reset_runtime_flags()
                 logger.error("RT2 error: %s", event)
 
     async def _send_session_update(self, ws: Any) -> None:
@@ -407,6 +407,10 @@ class RT2Session:
         self._commit_in_progress = False
         self._input_committed_since_activation = False
         self._server_vad_response_pending = False
+
+    def _reset_runtime_flags(self) -> None:
+        self._reset_turn_submission_flags()
+        self._response_active = False
 
     def _start_audio_streams(self) -> None:
         loop = asyncio.get_running_loop()

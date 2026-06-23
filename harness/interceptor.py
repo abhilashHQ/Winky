@@ -56,7 +56,19 @@ class ToolInterceptor:
                     },
                 )
                 return
-            normalized_step = normalize_canvas_step(step)
+            try:
+                normalized_step = normalize_canvas_step(step)
+            except Exception:
+                logger.exception("Canvas annotation normalization failed")
+                await self._send_tool_result(
+                    ws,
+                    call_id,
+                    {
+                        "status": "error",
+                        "message": "Canvas annotation failed.",
+                    },
+                )
+                return
             await self.state_machine.broadcast_canvas_event(
                 {
                     "type": "draw_annotation",

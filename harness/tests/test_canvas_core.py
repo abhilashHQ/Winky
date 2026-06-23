@@ -80,6 +80,23 @@ def test_normalize_canvas_step_wraps_single_annotation():
     }
 
 
+def test_normalize_canvas_step_accepts_missing_dimensions():
+    step = normalize_canvas_step({"kind": "rect", "x": 10, "y": 20})
+
+    assert step == {
+        "annotations": [
+            {
+                "kind": "rect",
+                "x": 10,
+                "y": 20,
+                "w": 0,
+                "h": 0,
+                "style": {},
+            }
+        ]
+    }
+
+
 def test_normalize_canvas_step_clamps_rect_to_bounds():
     step = normalize_canvas_step(
         {
@@ -240,6 +257,29 @@ async def test_get_screen_context_returns_error_on_capture_failure(monkeypatch):
 
     output = json.loads(ws.sent[0]["item"]["output"])
     assert output == {"status": "error", "message": "I couldn't capture the screen."}
+
+
+@pytest.mark.asyncio
+async def test_draw_annotation_validation_error_returns_tool_error(monkeypatch):
+    def fail_normalize(step):
+        raise ValueError("bad shape")
+
+    monkeypatch.setattr(interceptor, "normalize_canvas_step", fail_normalize)
+    tool_interceptor = ToolInterceptor(ResultQueue(), StateMachine())
+    ws = FakeToolWebSocket()
+
+    await tool_interceptor.handle_function_call(
+        ws,
+        {
+            "type": "response.function_call",
+            "name": "draw_annotation",
+            "call_id": "call-draw",
+            "arguments": {"step": {"kind": "rect"}},
+        },
+    )
+
+    output = json.loads(ws.sent[0]["item"]["output"])
+    assert output == {"status": "error", "message": "Canvas annotation failed."}
 
 
 @pytest.mark.asyncio
