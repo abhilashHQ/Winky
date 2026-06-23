@@ -314,6 +314,7 @@ async def test_draw_annotation_broadcasts_normalized_step(monkeypatch):
                     {"kind": "text", "x": 5, "y": 7, "text": "c", "style": {}}
                 ]
             },
+            "monitor": None,
         }
     ]
     output = json.loads(ws.sent[0]["item"]["output"])

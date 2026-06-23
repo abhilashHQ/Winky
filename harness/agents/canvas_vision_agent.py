@@ -4,6 +4,7 @@ from typing import Any
 import httpx
 
 from canvas_types import normalize_canvas_step
+from secrets import get as get_secret
 
 SYSTEM_PROMPT = """You are Winky's canvas vision planner.
 Return only JSON with this shape:
@@ -12,15 +13,6 @@ Use only these annotation kinds: line, arrow, rect, circle, text, formula, trian
 All coordinates must be monitor-relative to the screenshot, with top-left as 0,0.
 Keep plans short: 3 to 6 steps. Each say line must be one brief sentence.
 """
-
-
-def get_secret(key: str) -> str:
-    import os
-
-    value = os.environ.get(key.upper())
-    if value is None:
-        raise KeyError(key)
-    return value
 
 
 async def plan_visual_explanation(task: str, context: str) -> dict[str, Any]:

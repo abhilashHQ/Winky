@@ -71,10 +71,12 @@ class ToolInterceptor:
                     },
                 )
                 return
+            monitor = args.get("monitor")
             await self.state_machine.broadcast_canvas_event(
                 {
                     "type": "draw_annotation",
                     "step": normalized_step,
+                    "monitor": monitor if isinstance(monitor, dict) else None,
                 }
             )
             await self._send_tool_result(

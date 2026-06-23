@@ -55,8 +55,9 @@ function getCanvasBounds(monitor) {
     }
   }
 
-  const primaryDisplay = screen.getPrimaryDisplay()
-  return primaryDisplay.bounds
+  const cursorPoint = screen.getCursorScreenPoint()
+  const cursorDisplay = screen.getDisplayNearestPoint(cursorPoint)
+  return cursorDisplay.bounds
 }
 
 function createNotchWindow() {
