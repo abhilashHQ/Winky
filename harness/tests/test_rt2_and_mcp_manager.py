@@ -30,6 +30,7 @@ from agent_runner import AgentRunner
 from agents.email_agent import _clean_identifier
 from mcp_manager import MCPManager
 from session import RT2Session
+from state import HarnessState
 
 
 class FakeWebSocket:
@@ -66,6 +67,49 @@ async def test_always_on_server_vad_requests_response_without_manual_commit():
     await session._receive_events(ws)
 
     assert [message["type"] for message in ws.sent] == ["response.create"]
+
+
+@pytest.mark.asyncio
+async def test_tool_result_waits_for_response_done_before_followup(monkeypatch):
+    session = RT2Session(harness_dir=HARNESS_DIR)
+    ws = FakeWebSocket(
+        [
+            {
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "name": "draw_annotation",
+                    "call_id": "call-draw",
+                    "arguments": json.dumps({"step": {"kind": "text", "x": 1, "y": 2, "text": "a"}}),
+                },
+            },
+            {"type": "response.done"},
+        ]
+    )
+    session._ws = ws
+    session.ready.set()
+    session._response_active = True
+
+    async def fake_broadcast(message):
+        return None
+
+    monkeypatch.setattr(session.state_machine, "broadcast_canvas_event", fake_broadcast)
+
+    await session._receive_events(ws)
+
+    assert [message["type"] for message in ws.sent] == ["conversation.item.create", "response.create"]
+
+
+@pytest.mark.asyncio
+async def test_always_on_response_done_returns_to_listening_not_idle():
+    session = RT2Session(harness_dir=HARNESS_DIR)
+    ws = FakeWebSocket([{"type": "response.done"}])
+    session.state_machine.voice_input_mode = "always_on"
+    session.state_machine.voice_input_active = True
+
+    await session._receive_events(ws)
+
+    assert session.state_machine.state == HarnessState.LISTENING
 
 
 @pytest.mark.asyncio

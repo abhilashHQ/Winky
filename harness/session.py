@@ -130,6 +130,8 @@ class RT2Session:
         self._input_committed_since_activation = False
         self._server_vad_response_pending = False
         self._response_active = False
+        self._tool_result_pending_response = False
+        self._tool_result_pending_response = False
         self.state_machine.set_input_control_handler(self._handle_input_control)
 
     def start_background(self) -> None:
@@ -247,6 +249,9 @@ class RT2Session:
             elif event_type in {"input_audio_buffer.committed", "conversation.item.created"}:
                 if self._server_vad_response_pending:
                     await self._create_audio_response()
+                elif self._tool_result_pending_response and not self._response_active:
+                    await self._create_audio_response(force=True)
+                    self._tool_result_pending_response = False
             elif event_type == "response.created":
                 self._response_active = True
                 await self.state_machine.thinking()
@@ -257,14 +262,23 @@ class RT2Session:
                 logger.debug("RT2 audio output complete")
             elif event_type in {"response.function_call", "response.output_item.done"}:
                 if self._is_function_call_event(event):
-                    await self.interceptor.handle_function_call(ws, event)
+                    handled_tool = await self.interceptor.handle_function_call(ws, event)
+                    if handled_tool is not None:
+                        self._tool_result_pending_response = True
             elif event_type == "response.done":
                 self._response_active = False
                 self._reset_turn_submission_flags()
+                if self._tool_result_pending_response:
+                    await self._create_audio_response(force=True)
+                    self._tool_result_pending_response = False
+                    continue
                 injected = await self.result_queue.inject_next(ws)
                 if not injected:
-                    await self.state_machine.idle()
-                    await self.state_machine.dismiss()
+                    if self.state_machine.voice_input_mode == "always_on" and self.state_machine.voice_input_active:
+                        await self.state_machine.listening()
+                    else:
+                        await self.state_machine.idle()
+                        await self.state_machine.dismiss()
             elif event_type == "error":
                 self._reset_runtime_flags()
                 logger.error("RT2 error: %s", event)
@@ -385,14 +399,15 @@ class RT2Session:
         logger.info("Submitted audio buffer to RT2")
         self._sent_audio_since_activation = False
 
-    async def _create_audio_response(self) -> None:
-        if self._ws is None or not self.ready.is_set() or self._input_committed_since_activation or self._response_active:
+    async def _create_audio_response(self, force: bool = False) -> None:
+        if self._ws is None or not self.ready.is_set() or (self._input_committed_since_activation and not force) or self._response_active:
             logger.info(
-                "Response create skipped: ws_ready=%s session_ready=%s input_committed=%s response_active=%s",
+                "Response create skipped: ws_ready=%s session_ready=%s input_committed=%s response_active=%s force=%s",
                 self._ws is not None,
                 self.ready.is_set(),
                 self._input_committed_since_activation,
                 self._response_active,
+                force,
             )
             return
         self._input_committed_since_activation = True
