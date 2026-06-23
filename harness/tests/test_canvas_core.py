@@ -294,7 +294,7 @@ async def test_draw_annotation_broadcasts_normalized_step(monkeypatch):
     tool_interceptor = ToolInterceptor(ResultQueue(), state_machine)
     ws = FakeToolWebSocket()
 
-    await tool_interceptor.handle_function_call(
+    handled = await tool_interceptor.handle_function_call(
         ws,
         {
             "type": "response.function_call",
@@ -303,6 +303,8 @@ async def test_draw_annotation_broadcasts_normalized_step(monkeypatch):
             "arguments": {"step": {"kind": "text", "x": 5, "y": 7, "text": "c"}},
         },
     )
+
+    assert handled == "draw_annotation"
 
     assert sent == [
         {

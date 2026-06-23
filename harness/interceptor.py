@@ -21,14 +21,16 @@ class ToolInterceptor:
         self.agent_runner = AgentRunner(result_queue, state_machine)
         self._approval_lock = asyncio.Lock()
 
-    async def handle_function_call(self, ws: Any, event: dict[str, Any]) -> None:
+    async def handle_function_call(self, ws: Any, event: dict[str, Any]) -> str | None:
         name = self._get_tool_name(event)
         call_id = self._get_call_id(event)
         args = self._get_arguments(event)
 
         if not name or not call_id:
             logger.error("Invalid function call event: %s", event)
-            return
+            return None
+
+        logger.info("Handling RT2 tool call: %s", name)
 
         if name == "spawn_agent":
             await self._handle_spawn_agent(ws, call_id, args)
@@ -83,6 +85,7 @@ class ToolInterceptor:
                     "drawn": len(normalized_step["annotations"]),
                 },
             )
+            return "draw_annotation"
         elif name == "start_dictation":
             await self.state_machine.dictation()
             await self._send_tool_result(
@@ -105,6 +108,7 @@ class ToolInterceptor:
                     "message": f"Unknown tool: {name}",
                 },
             )
+        return name
 
     async def _handle_spawn_agent(
         self,

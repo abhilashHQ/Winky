@@ -257,7 +257,11 @@ class RT2Session:
                 logger.debug("RT2 audio output complete")
             elif event_type in {"response.function_call", "response.output_item.done"}:
                 if self._is_function_call_event(event):
-                    await self.interceptor.handle_function_call(ws, event)
+                    handled_tool = await self.interceptor.handle_function_call(ws, event)
+                    if handled_tool is not None:
+                        self._response_active = False
+                    if handled_tool == "draw_annotation":
+                        await self._create_audio_response(force=True)
             elif event_type == "response.done":
                 self._response_active = False
                 self._reset_turn_submission_flags()
@@ -385,20 +389,22 @@ class RT2Session:
         logger.info("Submitted audio buffer to RT2")
         self._sent_audio_since_activation = False
 
-    async def _create_audio_response(self) -> None:
-        if self._ws is None or not self.ready.is_set() or self._input_committed_since_activation or self._response_active:
+    async def _create_audio_response(self, force: bool = False) -> None:
+        if self._ws is None or not self.ready.is_set() or (self._input_committed_since_activation and not force) or self._response_active:
             logger.info(
-                "Response create skipped: ws_ready=%s session_ready=%s input_committed=%s response_active=%s",
+                "Response create skipped: ws_ready=%s session_ready=%s input_committed=%s response_active=%s force=%s",
                 self._ws is not None,
                 self.ready.is_set(),
                 self._input_committed_since_activation,
                 self._response_active,
+                force,
             )
             return
         self._input_committed_since_activation = True
         self._server_vad_response_pending = False
+        self._response_active = True
         await self._ws.send(json.dumps({"type": "response.create"}))
-        logger.info("Requested RT2 response for server VAD turn")
+        logger.info("Requested RT2 response")
         await self.state_machine.thinking()
         self._sent_audio_since_activation = False
 
