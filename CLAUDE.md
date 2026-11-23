@@ -1,3 +1,6 @@
+https://chatgpt.com/share/6b03af62-8d38-83ee-84bc-a0feb8e44612?ogimg=plain
+
+
 # Winky — Windows Voice Assistant
 
 Voice in, action out. GPT-Realtime-2 is the brain. The harness manages sub-agent lifecycle only. Speed is the leverage.
